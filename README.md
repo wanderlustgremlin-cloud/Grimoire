@@ -1,18 +1,20 @@
 # Grimoire
 
-A collection of .NET libraries for data extraction and data loading, with support for multiple database providers and integration with popular frameworks.
+A collection of .NET libraries for data connectivity, data loading, and observability.
 
 ## Projects
 
 | Project | Description |
 |---------|-------------|
 | **Grimoire.Core** | Shared core library |
-| **Grimoire.Extract** | Data extraction |
-| **Grimoire.Load** | Base data loading abstractions |
-| **Grimoire.Load.SqlServer** | SQL Server loading provider |
-| **Grimoire.Load.PostgreSql** | PostgreSQL loading provider |
-| **Grimoire.SignalR** | SignalR integration |
-| **Grimoire.EntityFrameworkCore** | Entity Framework Core integration |
+| **Grimoire.Connector** | Data source connectivity |
+| **Grimoire.Sink** | Data loading/destination |
+| **Grimoire.Observability.ActivityLog** | Activity logging |
+| **Grimoire.Observability.Logging** | Logging abstractions |
+| **Grimoire.Observability.Message** | Messaging/notifications |
+| **Grimoire.Observability.Metrics** | Metrics collection |
+| **Grimoire.Observability.OpenTelemetry** | OpenTelemetry integration |
+| **Grimoire.Observability.SignalR** | SignalR integration for observability |
 
 ## Getting Started
 
