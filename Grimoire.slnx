@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="Grimoire.Core/Grimoire.Core.csproj" />
+  <Project Path="Grimoire.Load/Grimoire.Load.csproj" />
 </Solution>

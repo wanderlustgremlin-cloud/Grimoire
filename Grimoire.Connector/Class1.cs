@@ -1,4 +1,4 @@
-﻿namespace Grimoire.SignalR
+﻿namespace Grimoire.Connector
 {
     public class Class1
     {
