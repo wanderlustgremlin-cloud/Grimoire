@@ -1,4 +1,4 @@
-﻿namespace Grimoire.Connector
+﻿namespace Grimoire.Map
 {
     public class Class1
     {

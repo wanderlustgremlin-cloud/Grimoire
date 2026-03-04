@@ -1,14 +1,21 @@
 # Grimoire
 
-A collection of .NET libraries for data connectivity, data loading, and observability.
+A collection of .NET NuGet libraries that provide config-driven ETL (Extract, Transform, Load) logic and observability.
 
-## Projects
+## ETL Projects
 
-| Project | Description |
+Grimoire provides ETL functionality as composable NuGet packages. Add only what you need:
+
+| Package | Description | Dependencies |
+|---------|-------------|--------------|
+| **Grimoire.Extract** | Data extraction | None |
+| **Grimoire.Transform** | Default transform logic | Extract |
+| **Grimoire.Load** | Data loading | Extract, Transform |
+
+## Observability Projects
+
+| Package | Description |
 |---------|-------------|
-| **Grimoire.Core** | Shared core library |
-| **Grimoire.Connector** | Data source connectivity |
-| **Grimoire.Sink** | Data loading/destination |
 | **Grimoire.Observability.ActivityLog** | Activity logging |
 | **Grimoire.Observability.Logging** | Logging abstractions |
 | **Grimoire.Observability.Message** | Messaging/notifications |

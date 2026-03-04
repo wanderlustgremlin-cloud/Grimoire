@@ -1,4 +1,11 @@
 <Solution>
-  <Project Path="Grimoire.Core/Grimoire.Core.csproj" />
-  <Project Path="Grimoire.Load/Grimoire.Load.csproj" />
+  <Project Path="Grimoire.Core/Grimoire.Extract.csproj" />
+  <Project Path="Grimoire.Map/Grimoire.Transform.csproj" />
+  <Project Path="Grimoire.Sink/Grimoire.Load.csproj" />
+  <Project Path="Grimoire.Observability.ActivityLog/Grimoire.Observability.ActivityLog.csproj" Id="c2804c89-e19e-4786-bba0-f60f5324c4e1" />
+  <Project Path="Grimoire.Observability.Logging/Grimoire.Observability.Logging.csproj" Id="86159e3e-0df7-49b7-914a-b5634e45d31b" />
+  <Project Path="Grimoire.Observability.Message/Grimoire.Observability.Message.csproj" Id="3cd5fd0a-408f-465f-bb28-d9a6c1ec5be2" />
+  <Project Path="Grimoire.Observability.Metrics/Grimoire.Observability.Metrics.csproj" Id="32482378-6459-4db6-8b8c-14ecef9b1a62" />
+  <Project Path="Grimoire.Observability.OpenTelemetry/Grimoire.Observability.OpenTelemetry.csproj" Id="902a5006-948a-4157-82b8-cffd0773f591" />
+  <Project Path="Grimoire.Observability.SignalR/Grimoire.Observability.SignalR.csproj" Id="704bae16-7edb-448c-b704-efaceed94d0e" />
 </Solution>
