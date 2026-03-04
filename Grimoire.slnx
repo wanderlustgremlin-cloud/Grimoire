@@ -1,7 +1,7 @@
 <Solution>
-  <Project Path="Grimoire.Core/Grimoire.Extract.csproj" />
-  <Project Path="Grimoire.Map/Grimoire.Transform.csproj" />
-  <Project Path="Grimoire.Sink/Grimoire.Load.csproj" />
+  <Project Path="Grimoire.Extract/Grimoire.Extract.csproj" />
+  <Project Path="Grimoire.Transform/Grimoire.Transform.csproj" />
+  <Project Path="Grimoire.Load/Grimoire.Load.csproj" />
   <Project Path="Grimoire.Observability.ActivityLog/Grimoire.Observability.ActivityLog.csproj" Id="c2804c89-e19e-4786-bba0-f60f5324c4e1" />
   <Project Path="Grimoire.Observability.Logging/Grimoire.Observability.Logging.csproj" Id="86159e3e-0df7-49b7-914a-b5634e45d31b" />
   <Project Path="Grimoire.Observability.Message/Grimoire.Observability.Message.csproj" Id="3cd5fd0a-408f-465f-bb28-d9a6c1ec5be2" />

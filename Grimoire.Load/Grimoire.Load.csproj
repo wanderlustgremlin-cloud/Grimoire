@@ -6,4 +6,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Grimoire.Extract\Grimoire.Extract.csproj" />
+    <ProjectReference Include="..\Grimoire.Transform\Grimoire.Transform.csproj" />
+  </ItemGroup>
+
 </Project>
