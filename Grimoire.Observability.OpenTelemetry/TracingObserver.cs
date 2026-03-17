@@ -41,6 +41,27 @@ public sealed class TracingObserver : IPipelineObserver
         }
     }
 
+    public void OnBatchLoaded(BatchResult batch)
+    {
+        if (_entityActivities.TryGetValue(batch.EntityName, out var activity))
+        {
+            var rowsPerSec = batch.Duration.TotalSeconds > 0
+                ? batch.RowsInBatch / batch.Duration.TotalSeconds
+                : 0;
+
+            activity?.AddEvent(new ActivityEvent("batch.loaded", tags: new ActivityTagsCollection
+            {
+                { "batch.number", batch.BatchNumber },
+                { "batch.rows", batch.RowsInBatch },
+                { "batch.duration_ms", batch.Duration.TotalMilliseconds },
+                { "batch.rows_per_sec", rowsPerSec },
+                { "batch.size", batch.BatchSize },
+                { "batch.inserted", batch.RowsInserted },
+                { "batch.updated", batch.RowsUpdated }
+            }));
+        }
+    }
+
     public void OnEntityComplete(EntityResult result)
     {
         if (_entityActivities.Remove(result.EntityName, out var activity) && activity is not null)

@@ -123,6 +123,11 @@ internal sealed class EntityRegistration
                 foreach (var observer in observers)
                     observer.OnProgress(EntityName, count);
             },
+            batch =>
+            {
+                foreach (var observer in observers)
+                    observer.OnBatchLoaded(batch);
+            },
             cancellationToken);
 
         result.RowsInserted = loadResult.RowsInserted;

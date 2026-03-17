@@ -1,4 +1,5 @@
 using System.Data;
+using System.Diagnostics;
 using System.Reflection;
 using Grimoire.Core.Results;
 using Microsoft.Data.SqlClient;
@@ -35,6 +36,7 @@ internal sealed class BulkLoader
         string entityName,
         Action<RowError>? onRowError,
         Action<int>? onProgress,
+        Action<BatchResult>? onBatchLoaded,
         CancellationToken cancellationToken) where TEntity : class, new()
     {
         var result = new EntityResult { EntityName = entityName };
@@ -50,11 +52,11 @@ internal sealed class BulkLoader
         {
             if (_matchConfig is not null && _matchConfig.MatchColumns.Count > 0)
             {
-                await LoadWithUpsertAsync(entities, connection, transaction, properties, result, onRowError, onProgress, cancellationToken);
+                await LoadWithUpsertAsync(entities, connection, transaction, properties, result, onRowError, onProgress, onBatchLoaded, cancellationToken);
             }
             else
             {
-                await LoadWithBulkCopyAsync(entities, connection, transaction, properties, result, onRowError, onProgress, cancellationToken);
+                await LoadWithBulkCopyAsync(entities, connection, transaction, properties, result, onRowError, onProgress, onBatchLoaded, cancellationToken);
             }
 
             await transaction.CommitAsync(cancellationToken);
@@ -76,16 +78,26 @@ internal sealed class BulkLoader
         EntityResult result,
         Action<RowError>? onRowError,
         Action<int>? onProgress,
+        Action<BatchResult>? onBatchLoaded,
         CancellationToken cancellationToken) where TEntity : class, new()
     {
         var batch = new List<(TEntity Entity, object? LegacyKey)>();
+        var batchNumber = 0;
 
         await foreach (var item in entities.WithCancellation(cancellationToken))
         {
             batch.Add(item);
             if (batch.Count >= _loadConfig.BatchSize)
             {
+                batchNumber++;
+                var insertedBefore = result.RowsInserted;
+                var sw = Stopwatch.StartNew();
                 await FlushBulkCopyBatchAsync(batch, connection, transaction, properties, result, cancellationToken);
+                sw.Stop();
+                onBatchLoaded?.Invoke(new BatchResult(
+                    result.EntityName, batchNumber, batch.Count,
+                    result.RowsInserted - insertedBefore, 0, 0,
+                    sw.Elapsed, _loadConfig.BatchSize));
                 onProgress?.Invoke(result.RowsInserted);
                 batch.Clear();
             }
@@ -93,7 +105,15 @@ internal sealed class BulkLoader
 
         if (batch.Count > 0)
         {
+            batchNumber++;
+            var insertedBefore = result.RowsInserted;
+            var sw = Stopwatch.StartNew();
             await FlushBulkCopyBatchAsync(batch, connection, transaction, properties, result, cancellationToken);
+            sw.Stop();
+            onBatchLoaded?.Invoke(new BatchResult(
+                result.EntityName, batchNumber, batch.Count,
+                result.RowsInserted - insertedBefore, 0, 0,
+                sw.Elapsed, _loadConfig.BatchSize));
             onProgress?.Invoke(result.RowsInserted);
         }
     }
@@ -208,11 +228,13 @@ internal sealed class BulkLoader
         EntityResult result,
         Action<RowError>? onRowError,
         Action<int>? onProgress,
+        Action<BatchResult>? onBatchLoaded,
         CancellationToken cancellationToken) where TEntity : class, new()
     {
         var handler = new UpsertHandler(_matchConfig!, _loadConfig.TargetTable, properties);
         var batch = new List<TEntity>();
         var batchKeys = new List<object?>();
+        var batchNumber = 0;
 
         await foreach (var (entity, legacyKey) in entities.WithCancellation(cancellationToken))
         {
@@ -221,7 +243,10 @@ internal sealed class BulkLoader
 
             if (batch.Count >= _loadConfig.BatchSize)
             {
+                batchNumber++;
+                var sw = Stopwatch.StartNew();
                 var (ins, upd, skip) = await handler.UpsertBatchAsync(connection, transaction, batch, cancellationToken);
+                sw.Stop();
                 result.RowsInserted += ins;
                 result.RowsUpdated += upd;
                 result.RowsSkipped += skip;
@@ -229,6 +254,9 @@ internal sealed class BulkLoader
                 if (_trackKeyProperty is not null)
                     TrackUpsertedKeys(batch, batchKeys, properties);
 
+                onBatchLoaded?.Invoke(new BatchResult(
+                    result.EntityName, batchNumber, batch.Count,
+                    ins, upd, skip, sw.Elapsed, _loadConfig.BatchSize));
                 onProgress?.Invoke(result.RowsInserted + result.RowsUpdated);
                 batch.Clear();
                 batchKeys.Clear();
@@ -237,7 +265,10 @@ internal sealed class BulkLoader
 
         if (batch.Count > 0)
         {
+            batchNumber++;
+            var sw = Stopwatch.StartNew();
             var (ins, upd, skip) = await handler.UpsertBatchAsync(connection, transaction, batch, cancellationToken);
+            sw.Stop();
             result.RowsInserted += ins;
             result.RowsUpdated += upd;
             result.RowsSkipped += skip;
@@ -245,6 +276,9 @@ internal sealed class BulkLoader
             if (_trackKeyProperty is not null)
                 TrackUpsertedKeys(batch, batchKeys, properties);
 
+            onBatchLoaded?.Invoke(new BatchResult(
+                result.EntityName, batchNumber, batch.Count,
+                ins, upd, skip, sw.Elapsed, _loadConfig.BatchSize));
             onProgress?.Invoke(result.RowsInserted + result.RowsUpdated);
         }
     }

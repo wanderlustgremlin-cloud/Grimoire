@@ -34,6 +34,18 @@ public sealed class LoggingObserver : IPipelineObserver
             error.EntityName, error.ErrorType, error.Message);
     }
 
+    public void OnBatchLoaded(BatchResult batch)
+    {
+        var rowsPerSec = batch.Duration.TotalSeconds > 0
+            ? batch.RowsInBatch / batch.Duration.TotalSeconds
+            : 0;
+
+        _logger.LogInformation(
+            "Entity {EntityName} batch {BatchNumber}: {RowsInBatch} rows in {Duration:N0}ms ({RowsPerSec:N0} rows/sec) — BatchSize: {BatchSize}",
+            batch.EntityName, batch.BatchNumber, batch.RowsInBatch,
+            batch.Duration.TotalMilliseconds, rowsPerSec, batch.BatchSize);
+    }
+
     public void OnEntityComplete(EntityResult result)
     {
         _logger.LogInformation(

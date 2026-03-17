@@ -33,6 +33,25 @@ public sealed class SignalRObserver : IPipelineObserver
         }).GetAwaiter().GetResult();
     }
 
+    public void OnBatchLoaded(BatchResult batch)
+    {
+        var rowsPerSec = batch.Duration.TotalSeconds > 0
+            ? batch.RowsInBatch / batch.Duration.TotalSeconds
+            : 0;
+
+        _hubContext.Clients.All.BatchLoaded(new BatchLoadedArgs
+        {
+            EntityName = batch.EntityName,
+            BatchNumber = batch.BatchNumber,
+            RowsInBatch = batch.RowsInBatch,
+            RowsInserted = batch.RowsInserted,
+            RowsUpdated = batch.RowsUpdated,
+            DurationMs = batch.Duration.TotalMilliseconds,
+            RowsPerSec = rowsPerSec,
+            BatchSize = batch.BatchSize
+        }).GetAwaiter().GetResult();
+    }
+
     public void OnEntityComplete(EntityResult result)
     {
         _hubContext.Clients.All.EntityCompleted(result.EntityName, new EntityCompletedArgs
