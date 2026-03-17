@@ -1,6 +1,6 @@
 # Grimoire
 
-A .NET ETL engine shipped as a single NuGet package. Grimoire handles transform, load, and orchestration — callers own their source connections.
+A .NET ETL engine shipped as a single NuGet package. Grimoire handles transform, load, and orchestration — callers own their source and target connections.
 
 ## How It Works
 
@@ -59,7 +59,7 @@ var result = await new GrimoirePipeline()
 ## Key Features
 
 - **Single package** — install `Grimoire.Core`, nothing else required
-- **Caller-owned extraction** — `IConnector` for databases, `ICustomExtractor` for anything else
+- **Caller-owned connections** — caller provides both source and target. `IConnector` for databases, `ICustomExtractor` for anything else
 - **Connector schema** — connector authors define table relationships, mapping authors just reference table names
 - **Fluent mapping API** — type-safe `GrimoireMapping<T>` with intellisense on target entity properties
 - **Key map FK resolution** — in-memory `{LegacyKey → NewKey}` per pipeline run, O(1) lookups

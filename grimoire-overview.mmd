@@ -1,0 +1,34 @@
+graph TD
+    subgraph Source["Source (Caller-Owned)"]
+        SourceDB["IConnector<br/>Databases"]
+        SourceCustom["ICustomExtractor<br/>APIs / Files / Queues"]
+    end
+
+    subgraph Core["Grimoire.Core"]
+        Extract["Extract<br/>Stream rows from source"]
+        Transform["Transform<br/>Fluent mapping · FK<br/>resolution · Type coercion"]
+        Load["Load<br/>SqlBulkCopy · Upsert via<br/>MatchOn"]
+        KeyMap[("Key Map<br/>Legacy ID → New ID")]
+    end
+
+    TargetDB[("Target DB (Caller-Owned)<br/>SQL Server / Postgres / etc.")]
+    EtlResult["EtlResult<br/>Rows inserted · updated · errors"]
+    Job["External App<br/>Scheduled Job<br/>Submits connector +<br/>mapping + load config"]
+
+    SourceDB -- "IAsyncEnumerable&lt;SourceRow&gt;" --> Extract
+    SourceCustom -- "IAsyncEnumerable&lt;SourceRow&gt;" --> Extract
+    Extract --> Transform
+    Transform --> Load
+    Load -- "register new IDs" --> KeyMap
+    KeyMap -- "resolve FKs" --> Transform
+    Load --> TargetDB
+    Load --> EtlResult
+    EtlResult --> Job
+
+    classDef sourceStyle fill:#fffff0,stroke:#999,color:#333
+    classDef coreStyle fill:#e8e8ff,stroke:#999,color:#333
+    classDef outputStyle fill:#fffff0,stroke:#999,color:#333
+
+    class SourceDB,SourceCustom sourceStyle
+    class Extract,Transform,Load,KeyMap coreStyle
+    class TargetDB,EtlResult,Job outputStyle
