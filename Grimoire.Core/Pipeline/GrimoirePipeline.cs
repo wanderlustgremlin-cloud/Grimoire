@@ -9,6 +9,7 @@ public sealed class GrimoirePipeline
     private readonly List<EntityRegistration> _entities = [];
     private readonly PipelineEvents _events = new();
     private readonly KeyMap.KeyMap _keyMap = new();
+    private readonly List<IPipelineObserver> _observers = [];
 
     public GrimoirePipeline ExtractFrom(IConnector connector)
     {
@@ -21,6 +22,12 @@ public sealed class GrimoirePipeline
         var builder = new EntityBuilder<TEntity>(this);
         _entities.Add(builder.Registration);
         return builder;
+    }
+
+    public GrimoirePipeline AddObserver(IPipelineObserver observer)
+    {
+        _observers.Add(observer);
+        return this;
     }
 
     public GrimoirePipeline OnRowError(Action<RowError> handler)
@@ -43,7 +50,7 @@ public sealed class GrimoirePipeline
 
     public async Task<EtlResult> ExecuteAsync(CancellationToken cancellationToken = default)
     {
-        var executor = new PipelineExecutor(_connector, _entities, _events, _keyMap);
+        var executor = new PipelineExecutor(_connector, _entities, _events, _observers, _keyMap);
         return await executor.ExecuteAsync(cancellationToken);
     }
 }

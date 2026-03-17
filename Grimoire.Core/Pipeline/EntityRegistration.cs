@@ -21,6 +21,7 @@ internal sealed class EntityRegistration
         IConnector? connector,
         KeyMap.KeyMap keyMap,
         PipelineEvents events,
+        List<IPipelineObserver> observers,
         CancellationToken cancellationToken)
     {
         var startTime = DateTime.UtcNow;
@@ -30,7 +31,7 @@ internal sealed class EntityRegistration
             .GetMethod(nameof(ExecuteInternalAsync), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .MakeGenericMethod(EntityType);
 
-        var result = await (Task<EntityResult>)method.Invoke(this, [connector, keyMap, events, cancellationToken])!;
+        var result = await (Task<EntityResult>)method.Invoke(this, [connector, keyMap, events, observers, cancellationToken])!;
         result.Duration = DateTime.UtcNow - startTime;
         return result;
     }
@@ -39,6 +40,7 @@ internal sealed class EntityRegistration
         IConnector? connector,
         KeyMap.KeyMap keyMap,
         PipelineEvents events,
+        List<IPipelineObserver> observers,
         CancellationToken cancellationToken) where TEntity : class, new()
     {
         var result = new EntityResult { EntityName = EntityName };
@@ -95,6 +97,8 @@ internal sealed class EntityRegistration
                 {
                     result.Errors.Add(error);
                     events.OnRowError?.Invoke(error);
+                    foreach (var observer in observers)
+                        observer.OnRowError(error);
                     continue;
                 }
 
@@ -110,8 +114,15 @@ internal sealed class EntityRegistration
             {
                 result.Errors.Add(error);
                 events.OnRowError?.Invoke(error);
+                foreach (var observer in observers)
+                    observer.OnRowError(error);
             },
-            count => events.OnProgress?.Invoke(EntityName, count),
+            count =>
+            {
+                events.OnProgress?.Invoke(EntityName, count);
+                foreach (var observer in observers)
+                    observer.OnProgress(EntityName, count);
+            },
             cancellationToken);
 
         result.RowsInserted = loadResult.RowsInserted;

@@ -8,17 +8,20 @@ internal sealed class PipelineExecutor
     private readonly IConnector? _connector;
     private readonly List<EntityRegistration> _entities;
     private readonly PipelineEvents _events;
+    private readonly List<IPipelineObserver> _observers;
     private readonly KeyMap.KeyMap _keyMap;
 
     public PipelineExecutor(
         IConnector? connector,
         List<EntityRegistration> entities,
         PipelineEvents events,
+        List<IPipelineObserver> observers,
         KeyMap.KeyMap keyMap)
     {
         _connector = connector;
         _entities = entities;
         _events = events;
+        _observers = observers;
         _keyMap = keyMap;
     }
 
@@ -41,17 +44,30 @@ internal sealed class PipelineExecutor
         // Topological sort
         var sorted = TopologicalSorter.Sort(_entities);
 
+        foreach (var observer in _observers)
+            observer.OnPipelineStarted();
+
         // Execute sequentially in dependency order
         foreach (var entity in sorted)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var entityResult = await entity.ExecuteAsync(_connector, _keyMap, _events, cancellationToken);
+            foreach (var observer in _observers)
+                observer.OnEntityStarted(entity.EntityName);
+
+            var entityResult = await entity.ExecuteAsync(_connector, _keyMap, _events, _observers, cancellationToken);
             result.EntityResults.Add(entityResult);
             _events.OnEntityComplete?.Invoke(entityResult);
+
+            foreach (var observer in _observers)
+                observer.OnEntityComplete(entityResult);
         }
 
         result.TotalDuration = DateTime.UtcNow - startTime;
+
+        foreach (var observer in _observers)
+            observer.OnPipelineComplete(result);
+
         return result;
     }
 }
