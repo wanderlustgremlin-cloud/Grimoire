@@ -43,11 +43,10 @@ public class EntityBuilderTests
     {
         var pipeline = new GrimoirePipeline();
         var builder = pipeline.Entity<Customer>()
-            .LoadInto("Customers", "Server=.;Database=Test", batchSize: 500);
+            .LoadInto("Customers", batchSize: 500);
 
         Assert.NotNull(builder.Registration.LoadConfig);
         Assert.Equal("Customers", builder.Registration.LoadConfig.TargetTable);
-        Assert.Equal("Server=.;Database=Test", builder.Registration.LoadConfig.ConnectionString);
         Assert.Equal(500, builder.Registration.LoadConfig.BatchSize);
     }
 
@@ -56,15 +55,29 @@ public class EntityBuilderTests
     {
         var pipeline = new GrimoirePipeline();
         var builder = pipeline.Entity<Customer>()
-            .LoadInto("Customers", "Server=.;Database=Test");
+            .LoadInto("Customers");
 
         Assert.Equal(1000, builder.Registration.LoadConfig!.BatchSize);
     }
 
     [Fact]
+    public void LoadInto_with_provider_sets_config()
+    {
+        var provider = new StubTargetProvider();
+        var pipeline = new GrimoirePipeline();
+        var builder = pipeline.Entity<Customer>()
+            .LoadInto("Customers", provider, batchSize: 250);
+
+        Assert.NotNull(builder.Registration.LoadConfig);
+        Assert.Equal("Customers", builder.Registration.LoadConfig.TargetTable);
+        Assert.Same(provider, builder.Registration.LoadConfig.Provider);
+        Assert.Equal(250, builder.Registration.LoadConfig.BatchSize);
+    }
+
+    [Fact]
     public void LoadInto_config_overload_sets_config()
     {
-        var config = new LoadConfig { TargetTable = "Cust", ConnectionString = "conn", BatchSize = 250 };
+        var config = new LoadConfig { TargetTable = "Cust", BatchSize = 250 };
         var pipeline = new GrimoirePipeline();
         var builder = pipeline.Entity<Customer>().LoadInto(config);
 
@@ -170,7 +183,7 @@ public class EntityBuilderTests
 
         var result = pipeline.Entity<Customer>()
             .TransformUsing<CustomerMapping>()
-            .LoadInto("Customers", "conn")
+            .LoadInto("Customers")
             .Done();
 
         Assert.Same(pipeline, result);
@@ -181,21 +194,40 @@ public class EntityBuilderTests
     {
         var pipeline = new GrimoirePipeline();
         var extractor = new InMemoryExtractor([]);
+        var provider = new StubTargetProvider();
 
         pipeline
+            .LoadWith(provider)
             .Entity<Department>()
-                .LoadInto("Departments", "conn", 2000)
+                .LoadInto("Departments", batchSize: 2000)
                 .ExtractUsing(extractor)
                 .Done()
             .Entity<Customer>()
                 .TransformUsing<CustomerMapping>()
                 .ExtractUsing(extractor)
-                .LoadInto("Customers", "conn")
+                .LoadInto("Customers")
                 .DependsOn<Department>()
                 .TrackKey("Id", "legacy_id")
                 .MatchOn(m => m.Columns("Email").WhenMatched(UpdateStrategy.Skip))
                 .Done();
 
         // If we got here without exception, the fluent chain works
+    }
+
+    [Fact]
+    public void LoadWith_returns_pipeline_for_chaining()
+    {
+        var pipeline = new GrimoirePipeline();
+        var provider = new StubTargetProvider();
+
+        var result = pipeline.LoadWith(provider);
+
+        Assert.Same(pipeline, result);
+    }
+
+    private class StubTargetProvider : ITargetProvider
+    {
+        public Task<ITargetSession> BeginSessionAsync(string targetTable, CancellationToken ct)
+            => throw new NotImplementedException();
     }
 }

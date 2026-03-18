@@ -42,7 +42,14 @@ internal sealed class ConnectorExtractor
         }
     }
 
-    private static string BuildQuery(ExtractRequest request, Dictionary<string, TableSchema> schemas)
+    private string Q(string identifier) => _connector.Provider switch
+    {
+        DatabaseProvider.SqlServer => $"[{identifier}]",
+        DatabaseProvider.MySql => $"`{identifier}`",
+        _ => $"\"{identifier}\""  // Postgres, Oracle use double quotes
+    };
+
+    private string BuildQuery(ExtractRequest request, Dictionary<string, TableSchema> schemas)
     {
         if (request.SourceTables.Count == 0)
             throw new InvalidOperationException($"Entity '{request.EntityName}' has no source tables configured. Call FromTables() in the mapping.");
@@ -64,21 +71,21 @@ internal sealed class ConnectorExtractor
                     if (schemas.TryGetValue(tableName, out var schema) && schema.Columns.Count > 0)
                     {
                         if (schema.Columns.Contains(col, StringComparer.OrdinalIgnoreCase))
-                            return $"[{tableName}].[{col}]";
+                            return $"{Q(tableName)}.{Q(col)}";
                     }
                 }
                 // Default to primary table
-                return $"[{primaryTable}].[{col}]";
+                return $"{Q(primaryTable)}.{Q(col)}";
             });
             sb.Append("SELECT ").AppendJoin(", ", qualifiedColumns);
         }
         else
         {
-            sb.Append($"SELECT [{primaryTable}].*");
+            sb.Append($"SELECT {Q(primaryTable)}.*");
         }
 
         // FROM
-        sb.Append($" FROM [{primaryTable}]");
+        sb.Append($" FROM {Q(primaryTable)}");
 
         // JOINs
         for (int i = 1; i < request.SourceTables.Count; i++)
@@ -87,7 +94,7 @@ internal sealed class ConnectorExtractor
             var join = FindJoin(primarySchema, joinTable, schemas);
             if (join is not null)
             {
-                sb.Append($" INNER JOIN [{join.ToTable}] ON [{join.FromTable}].[{join.FromColumn}] = [{join.ToTable}].[{join.ToColumn}]");
+                sb.Append($" INNER JOIN {Q(join.ToTable)} ON {Q(join.FromTable)}.{Q(join.FromColumn)} = {Q(join.ToTable)}.{Q(join.ToColumn)}");
             }
             else
             {

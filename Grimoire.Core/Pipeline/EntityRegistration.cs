@@ -21,6 +21,7 @@ internal sealed class EntityRegistration
 
     public async Task<EntityResult> ExecuteAsync(
         IConnector? connector,
+        ITargetProvider? defaultTargetProvider,
         KeyMap.KeyMap keyMap,
         PipelineEvents events,
         List<IPipelineObserver> observers,
@@ -28,18 +29,18 @@ internal sealed class EntityRegistration
     {
         var startTime = DateTime.UtcNow;
 
-        // Use reflection to call the generic ExecuteInternalAsync
         var method = typeof(EntityRegistration)
             .GetMethod(nameof(ExecuteInternalAsync), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .MakeGenericMethod(EntityType);
 
-        var result = await (Task<EntityResult>)method.Invoke(this, [connector, keyMap, events, observers, cancellationToken])!;
+        var result = await (Task<EntityResult>)method.Invoke(this, [connector, defaultTargetProvider, keyMap, events, observers, cancellationToken])!;
         result.Duration = DateTime.UtcNow - startTime;
         return result;
     }
 
     private async Task<EntityResult> ExecuteInternalAsync<TEntity>(
         IConnector? connector,
+        ITargetProvider? defaultTargetProvider,
         KeyMap.KeyMap keyMap,
         PipelineEvents events,
         List<IPipelineObserver> observers,
@@ -49,6 +50,9 @@ internal sealed class EntityRegistration
 
         if (LoadConfig is null)
             throw new InvalidOperationException($"Entity '{EntityName}' has no load configuration. Call LoadInto() to configure.");
+
+        var provider = LoadConfig.Provider ?? defaultTargetProvider
+            ?? throw new InvalidOperationException($"Entity '{EntityName}' has no target provider. Call LoadWith() on the pipeline or provide a provider in LoadInto().");
 
         // Build mapping
         var mapping = (GrimoireMapping<TEntity>?)Mapping
@@ -91,7 +95,8 @@ internal sealed class EntityRegistration
         }
 
         // Transform + Load (streaming)
-        var loader = new BulkLoader(LoadConfig, MatchConfig, keyMap, EntityType,
+        var loader = new BulkLoader(provider, LoadConfig.TargetTable, LoadConfig.BatchSize,
+            MatchConfig, keyMap, EntityType,
             TrackKeyProperty, TrackKeyLegacyColumn, TrackKeyGenerator is not null, TrackKeyDbGenerated);
 
         // Cache the key property setter for app-generated keys

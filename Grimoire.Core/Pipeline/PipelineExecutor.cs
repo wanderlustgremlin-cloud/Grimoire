@@ -1,4 +1,5 @@
 using Grimoire.Core.Extract;
+using Grimoire.Core.Load;
 using Grimoire.Core.Results;
 
 namespace Grimoire.Core.Pipeline;
@@ -6,6 +7,7 @@ namespace Grimoire.Core.Pipeline;
 internal sealed class PipelineExecutor
 {
     private readonly IConnector? _connector;
+    private readonly ITargetProvider? _defaultTargetProvider;
     private readonly List<EntityRegistration> _entities;
     private readonly PipelineEvents _events;
     private readonly List<IPipelineObserver> _observers;
@@ -13,12 +15,14 @@ internal sealed class PipelineExecutor
 
     public PipelineExecutor(
         IConnector? connector,
+        ITargetProvider? defaultTargetProvider,
         List<EntityRegistration> entities,
         PipelineEvents events,
         List<IPipelineObserver> observers,
         KeyMap.KeyMap keyMap)
     {
         _connector = connector;
+        _defaultTargetProvider = defaultTargetProvider;
         _entities = entities;
         _events = events;
         _observers = observers;
@@ -39,6 +43,8 @@ internal sealed class PipelineExecutor
                 throw new InvalidOperationException($"Entity '{entity.EntityName}' has no mapping configured.");
             if (entity.CustomExtractor is null && _connector is null)
                 throw new InvalidOperationException($"Entity '{entity.EntityName}' has no data source. Provide a connector or custom extractor.");
+            if (entity.LoadConfig.Provider is null && _defaultTargetProvider is null)
+                throw new InvalidOperationException($"Entity '{entity.EntityName}' has no target provider. Call LoadWith() on the pipeline or provide a provider in LoadInto().");
         }
 
         // Topological sort
@@ -55,7 +61,7 @@ internal sealed class PipelineExecutor
             foreach (var observer in _observers)
                 observer.OnEntityStarted(entity.EntityName);
 
-            var entityResult = await entity.ExecuteAsync(_connector, _keyMap, _events, _observers, cancellationToken);
+            var entityResult = await entity.ExecuteAsync(_connector, _defaultTargetProvider, _keyMap, _events, _observers, cancellationToken);
             result.EntityResults.Add(entityResult);
             _events.OnEntityComplete?.Invoke(entityResult);
 

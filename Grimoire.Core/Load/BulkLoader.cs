@@ -1,14 +1,14 @@
-using System.Data;
 using System.Diagnostics;
 using System.Reflection;
 using Grimoire.Core.Results;
-using Microsoft.Data.SqlClient;
 
 namespace Grimoire.Core.Load;
 
 internal sealed class BulkLoader
 {
-    private readonly LoadConfig _loadConfig;
+    private readonly ITargetProvider _provider;
+    private readonly string _targetTable;
+    private readonly int _batchSize;
     private readonly MatchConfig? _matchConfig;
     private readonly KeyMap.KeyMap _keyMap;
     private readonly Type _entityType;
@@ -18,7 +18,9 @@ internal sealed class BulkLoader
     private readonly bool _trackKeyDbGenerated;
 
     public BulkLoader(
-        LoadConfig loadConfig,
+        ITargetProvider provider,
+        string targetTable,
+        int batchSize,
         MatchConfig? matchConfig,
         KeyMap.KeyMap keyMap,
         Type entityType,
@@ -27,7 +29,9 @@ internal sealed class BulkLoader
         bool trackKeyAppGenerated = false,
         bool trackKeyDbGenerated = false)
     {
-        _loadConfig = loadConfig;
+        _provider = provider;
+        _targetTable = targetTable;
+        _batchSize = batchSize;
         _matchConfig = matchConfig;
         _keyMap = keyMap;
         _entityType = entityType;
@@ -50,73 +54,44 @@ internal sealed class BulkLoader
             .Where(p => p.CanRead && p.CanWrite)
             .ToList();
 
-        await using var connection = new SqlConnection(_loadConfig.ConnectionString);
-        await connection.OpenAsync(cancellationToken);
-        await using var transaction = connection.BeginTransaction();
+        await using var session = await _provider.BeginSessionAsync(_targetTable, cancellationToken);
 
         try
         {
-            // Detect columns to exclude from INSERT:
-            // - DB identity columns (auto-detected via sys.columns)
-            // - dbGenerated columns (user-flagged, e.g. DEFAULT NEWID())
-            // - But NOT app-generated columns (user provides value before INSERT)
-            var generatedColumns = await GetIdentityColumnsAsync(connection, transaction, cancellationToken);
+            var generatedColumns = await session.GetGeneratedColumnsAsync(cancellationToken);
 
             if (_trackKeyDbGenerated && _trackKeyProperty is not null)
                 generatedColumns.Add(_trackKeyProperty);
 
-            // App-generated keys have their value set before INSERT, so don't exclude them
             if (_trackKeyAppGenerated && _trackKeyProperty is not null)
                 generatedColumns.Remove(_trackKeyProperty);
 
             if (_matchConfig is not null && _matchConfig.MatchColumns.Count > 0)
             {
-                await LoadWithUpsertAsync(entities, connection, transaction, properties, generatedColumns, result, onRowError, onProgress, onBatchLoaded, cancellationToken);
+                await LoadWithUpsertAsync(entities, session, properties, generatedColumns, result, onRowError, onProgress, onBatchLoaded, cancellationToken);
             }
             else
             {
                 var insertProperties = properties
                     .Where(p => !generatedColumns.Contains(p.Name))
                     .ToList();
-                await LoadWithBulkCopyAsync(entities, connection, transaction, properties, insertProperties, result, onRowError, onProgress, onBatchLoaded, cancellationToken);
+                await LoadWithBulkCopyAsync(entities, session, properties, insertProperties, result, onRowError, onProgress, onBatchLoaded, cancellationToken);
             }
 
-            await transaction.CommitAsync(cancellationToken);
+            await session.CommitAsync(cancellationToken);
         }
         catch (Exception ex)
         {
-            await transaction.RollbackAsync(cancellationToken);
+            await session.RollbackAsync(cancellationToken);
             result.Errors.Add(new RowError(entityName, RowErrorType.LoadError, $"Load failed: {ex.Message}", Exception: ex));
         }
 
         return result;
     }
 
-    private async Task<HashSet<string>> GetIdentityColumnsAsync(
-        SqlConnection connection,
-        SqlTransaction transaction,
-        CancellationToken cancellationToken)
-    {
-        var identityColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        await using var cmd = new SqlCommand(
-            "SELECT c.name FROM sys.columns c WHERE c.object_id = OBJECT_ID(@table) AND c.is_identity = 1",
-            connection, transaction);
-        cmd.Parameters.AddWithValue("@table", _loadConfig.TargetTable);
-
-        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            identityColumns.Add(reader.GetString(0));
-        }
-
-        return identityColumns;
-    }
-
     private async Task LoadWithBulkCopyAsync<TEntity>(
         IAsyncEnumerable<(TEntity Entity, object? LegacyKey)> entities,
-        SqlConnection connection,
-        SqlTransaction transaction,
+        ITargetSession session,
         List<PropertyInfo> properties,
         List<PropertyInfo> insertProperties,
         EntityResult result,
@@ -131,17 +106,17 @@ internal sealed class BulkLoader
         await foreach (var item in entities.WithCancellation(cancellationToken))
         {
             batch.Add(item);
-            if (batch.Count >= _loadConfig.BatchSize)
+            if (batch.Count >= _batchSize)
             {
                 batchNumber++;
                 var insertedBefore = result.RowsInserted;
                 var sw = Stopwatch.StartNew();
-                await FlushBulkCopyBatchAsync(batch, connection, transaction, properties, insertProperties, result, cancellationToken);
+                await FlushBulkCopyBatchAsync(batch, session, properties, insertProperties, result, cancellationToken);
                 sw.Stop();
                 onBatchLoaded?.Invoke(new BatchResult(
                     result.EntityName, batchNumber, batch.Count,
                     result.RowsInserted - insertedBefore, 0, 0,
-                    sw.Elapsed, _loadConfig.BatchSize));
+                    sw.Elapsed, _batchSize));
                 onProgress?.Invoke(result.RowsInserted);
                 batch.Clear();
             }
@@ -152,67 +127,49 @@ internal sealed class BulkLoader
             batchNumber++;
             var insertedBefore = result.RowsInserted;
             var sw = Stopwatch.StartNew();
-            await FlushBulkCopyBatchAsync(batch, connection, transaction, properties, insertProperties, result, cancellationToken);
+            await FlushBulkCopyBatchAsync(batch, session, properties, insertProperties, result, cancellationToken);
             sw.Stop();
             onBatchLoaded?.Invoke(new BatchResult(
                 result.EntityName, batchNumber, batch.Count,
                 result.RowsInserted - insertedBefore, 0, 0,
-                sw.Elapsed, _loadConfig.BatchSize));
+                sw.Elapsed, _batchSize));
             onProgress?.Invoke(result.RowsInserted);
         }
     }
 
     private async Task FlushBulkCopyBatchAsync<TEntity>(
         List<(TEntity Entity, object? LegacyKey)> batch,
-        SqlConnection connection,
-        SqlTransaction transaction,
+        ITargetSession session,
         List<PropertyInfo> allProperties,
         List<PropertyInfo> insertProperties,
         EntityResult result,
         CancellationToken cancellationToken) where TEntity : class, new()
     {
-        var table = new DataTable();
-        foreach (var prop in insertProperties)
-        {
-            var colType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
-            table.Columns.Add(prop.Name, colType);
-        }
+        var columns = insertProperties.Select(p => p.Name).ToList();
+        var rows = new List<Dictionary<string, object?>>(batch.Count);
 
         foreach (var (entity, _) in batch)
         {
-            var row = table.NewRow();
+            var row = new Dictionary<string, object?>();
             foreach (var prop in insertProperties)
             {
-                row[prop.Name] = prop.GetValue(entity) ?? DBNull.Value;
+                row[prop.Name] = prop.GetValue(entity);
             }
-            table.Rows.Add(row);
+            rows.Add(row);
         }
 
-        using var bulkCopy = new SqlBulkCopy(connection, SqlBulkCopyOptions.Default, transaction)
-        {
-            DestinationTableName = $"[{_loadConfig.TargetTable}]",
-            BatchSize = _loadConfig.BatchSize
-        };
-
-        foreach (var prop in insertProperties)
-        {
-            bulkCopy.ColumnMappings.Add(prop.Name, prop.Name);
-        }
-
-        await bulkCopy.WriteToServerAsync(table, cancellationToken);
+        await session.BulkInsertAsync(rows, columns, _batchSize, cancellationToken);
         result.RowsInserted += batch.Count;
 
-        // Track keys after insert
         if (_trackKeyProperty is not null)
         {
-            await TrackInsertedKeysAsync(batch, connection, transaction, allProperties, cancellationToken);
+            await TrackInsertedKeysAsync(batch, session, allProperties, cancellationToken);
         }
     }
 
     private async Task TrackInsertedKeysAsync<TEntity>(
         List<(TEntity Entity, object? LegacyKey)> batch,
-        SqlConnection connection,
-        SqlTransaction transaction,
+        ITargetSession session,
         List<PropertyInfo> properties,
         CancellationToken cancellationToken) where TEntity : class, new()
     {
@@ -221,8 +178,6 @@ internal sealed class BulkLoader
         var keyProp = properties.FirstOrDefault(p => p.Name.Equals(_trackKeyProperty, StringComparison.OrdinalIgnoreCase));
         if (keyProp is null) return;
 
-        // For bulk copy, we need to query back the inserted keys
-        // using the match columns or a known unique column
         if (_matchConfig is { MatchColumns.Count: > 0 })
         {
             var matchProps = properties
@@ -233,18 +188,12 @@ internal sealed class BulkLoader
             {
                 if (legacyKey is null) continue;
 
-                var whereClauses = matchProps.Select((p, i) => $"[{p.Name}] = @p{i}");
-                var sql = $"SELECT [{_trackKeyProperty}] FROM [{_loadConfig.TargetTable}] WHERE {string.Join(" AND ", whereClauses)}";
+                var matchValues = matchProps
+                    .Select(p => (p.Name, p.GetValue(entity)))
+                    .ToList();
 
-                await using var cmd = new SqlCommand(sql, connection, transaction);
-                for (int i = 0; i < matchProps.Count; i++)
-                {
-                    var value = matchProps[i].GetValue(entity);
-                    cmd.Parameters.AddWithValue($"@p{i}", value ?? DBNull.Value);
-                }
-
-                var newKey = await cmd.ExecuteScalarAsync(cancellationToken);
-                if (newKey is not null and not DBNull)
+                var newKey = await session.ReadGeneratedKeyAsync(_trackKeyProperty, matchValues, cancellationToken);
+                if (newKey is not null)
                 {
                     _keyMap.Register(_entityType, legacyKey, newKey);
                 }
@@ -252,7 +201,6 @@ internal sealed class BulkLoader
         }
         else
         {
-            // Without match columns, track using entity property value directly
             foreach (var (entity, legacyKey) in batch)
             {
                 if (legacyKey is null) continue;
@@ -267,8 +215,7 @@ internal sealed class BulkLoader
 
     private async Task LoadWithUpsertAsync<TEntity>(
         IAsyncEnumerable<(TEntity Entity, object? LegacyKey)> entities,
-        SqlConnection connection,
-        SqlTransaction transaction,
+        ITargetSession session,
         List<PropertyInfo> properties,
         HashSet<string> generatedColumns,
         EntityResult result,
@@ -277,7 +224,7 @@ internal sealed class BulkLoader
         Action<BatchResult>? onBatchLoaded,
         CancellationToken cancellationToken) where TEntity : class, new()
     {
-        var handler = new UpsertHandler(_matchConfig!, _loadConfig.TargetTable, properties, generatedColumns);
+        var handler = new UpsertHandler(_matchConfig!, session, properties, generatedColumns);
         var batch = new List<TEntity>();
         var batchKeys = new List<object?>();
         var batchNumber = 0;
@@ -287,11 +234,11 @@ internal sealed class BulkLoader
             batch.Add(entity);
             batchKeys.Add(legacyKey);
 
-            if (batch.Count >= _loadConfig.BatchSize)
+            if (batch.Count >= _batchSize)
             {
                 batchNumber++;
                 var sw = Stopwatch.StartNew();
-                var (ins, upd, skip) = await handler.UpsertBatchAsync(connection, transaction, batch, cancellationToken);
+                var (ins, upd, skip) = await handler.UpsertBatchAsync(batch, cancellationToken);
                 sw.Stop();
                 result.RowsInserted += ins;
                 result.RowsUpdated += upd;
@@ -302,7 +249,7 @@ internal sealed class BulkLoader
 
                 onBatchLoaded?.Invoke(new BatchResult(
                     result.EntityName, batchNumber, batch.Count,
-                    ins, upd, skip, sw.Elapsed, _loadConfig.BatchSize));
+                    ins, upd, skip, sw.Elapsed, _batchSize));
                 onProgress?.Invoke(result.RowsInserted + result.RowsUpdated);
                 batch.Clear();
                 batchKeys.Clear();
@@ -313,7 +260,7 @@ internal sealed class BulkLoader
         {
             batchNumber++;
             var sw = Stopwatch.StartNew();
-            var (ins, upd, skip) = await handler.UpsertBatchAsync(connection, transaction, batch, cancellationToken);
+            var (ins, upd, skip) = await handler.UpsertBatchAsync(batch, cancellationToken);
             sw.Stop();
             result.RowsInserted += ins;
             result.RowsUpdated += upd;
@@ -324,7 +271,7 @@ internal sealed class BulkLoader
 
             onBatchLoaded?.Invoke(new BatchResult(
                 result.EntityName, batchNumber, batch.Count,
-                ins, upd, skip, sw.Elapsed, _loadConfig.BatchSize));
+                ins, upd, skip, sw.Elapsed, _batchSize));
             onProgress?.Invoke(result.RowsInserted + result.RowsUpdated);
         }
     }

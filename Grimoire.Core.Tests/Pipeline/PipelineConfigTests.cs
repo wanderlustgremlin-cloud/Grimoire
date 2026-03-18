@@ -1,3 +1,4 @@
+using Grimoire.Core.Load;
 using Grimoire.Core.Pipeline;
 using Grimoire.Core.Results;
 
@@ -20,10 +21,12 @@ public class PipelineConfigTests
     [Fact]
     public async Task ExecuteAsync_throws_when_entity_has_no_mapping()
     {
+        var provider = new StubTargetProvider();
         var pipeline = new GrimoirePipeline();
-        pipeline.Entity<Customer>()
+        pipeline.LoadWith(provider)
+            .Entity<Customer>()
             .ExtractUsing(new InMemoryExtractor([]))
-            .LoadInto("Customers", "Server=.;Database=Test")
+            .LoadInto("Customers")
             .Done(); // no TransformUsing
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => pipeline.ExecuteAsync());
@@ -32,11 +35,26 @@ public class PipelineConfigTests
     [Fact]
     public async Task ExecuteAsync_throws_when_entity_has_no_data_source()
     {
+        var provider = new StubTargetProvider();
+        var pipeline = new GrimoirePipeline();
+        pipeline.LoadWith(provider)
+            .Entity<Customer>()
+            .TransformUsing<CustomerMapping>()
+            .LoadInto("Customers")
+            .Done(); // no ExtractUsing or ExtractFrom
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => pipeline.ExecuteAsync());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_throws_when_entity_has_no_target_provider()
+    {
         var pipeline = new GrimoirePipeline();
         pipeline.Entity<Customer>()
             .TransformUsing<CustomerMapping>()
-            .LoadInto("Customers", "Server=.;Database=Test")
-            .Done(); // no ExtractUsing or ExtractFrom
+            .ExtractUsing(new InMemoryExtractor([]))
+            .LoadInto("Customers")
+            .Done(); // no LoadWith or provider in LoadInto
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => pipeline.ExecuteAsync());
     }
@@ -83,4 +101,10 @@ public class PipelineConfigTests
     }
 
     private class TestObserver : IPipelineObserver { }
+
+    private class StubTargetProvider : ITargetProvider
+    {
+        public Task<ITargetSession> BeginSessionAsync(string targetTable, CancellationToken ct)
+            => throw new NotImplementedException();
+    }
 }

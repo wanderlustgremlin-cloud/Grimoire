@@ -1,4 +1,5 @@
 using Grimoire.Core.Extract;
+using Grimoire.Core.Load;
 using Grimoire.Core.Results;
 
 namespace Grimoire.Core.Pipeline;
@@ -6,6 +7,7 @@ namespace Grimoire.Core.Pipeline;
 public sealed class GrimoirePipeline
 {
     private IConnector? _connector;
+    private ITargetProvider? _defaultTargetProvider;
     private readonly List<EntityRegistration> _entities = [];
     private readonly PipelineEvents _events = new();
     private readonly KeyMap.KeyMap _keyMap = new();
@@ -14,6 +16,12 @@ public sealed class GrimoirePipeline
     public GrimoirePipeline ExtractFrom(IConnector connector)
     {
         _connector = connector;
+        return this;
+    }
+
+    public GrimoirePipeline LoadWith(ITargetProvider provider)
+    {
+        _defaultTargetProvider = provider;
         return this;
     }
 
@@ -50,7 +58,7 @@ public sealed class GrimoirePipeline
 
     public async Task<EtlResult> ExecuteAsync(CancellationToken cancellationToken = default)
     {
-        var executor = new PipelineExecutor(_connector, _entities, _events, _observers, _keyMap);
+        var executor = new PipelineExecutor(_connector, _defaultTargetProvider, _entities, _events, _observers, _keyMap);
         return await executor.ExecuteAsync(cancellationToken);
     }
 }

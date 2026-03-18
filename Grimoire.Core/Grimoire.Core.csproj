@@ -10,8 +10,5 @@
     <InternalsVisibleTo Include="Grimoire.Core.Tests" />
   </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.0.1" />
-  </ItemGroup>
 
 </Project>

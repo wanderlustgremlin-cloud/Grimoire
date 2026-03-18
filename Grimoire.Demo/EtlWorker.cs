@@ -5,6 +5,7 @@ using Grimoire.Demo.Mappings;
 using Grimoire.Observability.Logging;
 using Grimoire.Observability.Metrics;
 using Grimoire.Observability.OpenTelemetry;
+using Grimoire.Provider.SqlServer;
 
 namespace Grimoire.Demo;
 
@@ -36,9 +37,14 @@ public class EtlWorker(
             // 2. Build and run the Grimoire ETL pipeline
             logger.LogInformation("Starting ETL pipeline...");
 
+            var target = new SqlServerTargetProvider(targetConnStr);
+
             var result = await new GrimoirePipeline()
                 // Source database connector
                 .ExtractFrom(new LegacyConnector(legacyConnStr))
+
+                // Target database provider
+                .LoadWith(target)
 
                 // Observability — visible in Aspire dashboard
                 .AddLogging(loggerFactory)
@@ -48,7 +54,7 @@ public class EtlWorker(
                 // Entity: Departments (extracted first, no dependencies)
                 .Entity<Department>()
                     .TransformUsing<DepartmentMapping>()
-                    .LoadInto("Departments", targetConnStr, batchSize: 100)
+                    .LoadInto("Departments", batchSize: 100)
                     .MatchOn(m => m.Columns("Name").WhenMatched(UpdateStrategy.Skip))
                     .TrackKey("Id", "DeptName")
                     .Done()
@@ -56,7 +62,7 @@ public class EtlWorker(
                 // Entity: Employees (depends on Departments for FK resolution)
                 .Entity<Employee>()
                     .TransformUsing<EmployeeMapping>()
-                    .LoadInto("Employees", targetConnStr, batchSize: 500)
+                    .LoadInto("Employees", batchSize: 500)
                     .MatchOn(m => m.Columns("Email").WhenMatched(UpdateStrategy.OverwriteChanged))
                     .DependsOn<Department>()
                     .TrackKey("Id", "EmpId")
@@ -65,7 +71,7 @@ public class EtlWorker(
                 // Entity: Responsibilities (depends on Employees for FK resolution)
                 .Entity<Responsibility>()
                     .TransformUsing<ResponsibilityMapping>()
-                    .LoadInto("Responsibilities", targetConnStr, batchSize: 500)
+                    .LoadInto("Responsibilities", batchSize: 500)
                     .DependsOn<Employee>()
                     .Done()
 

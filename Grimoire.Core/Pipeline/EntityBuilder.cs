@@ -37,12 +37,22 @@ public sealed class EntityBuilder<TEntity> where TEntity : class, new()
         return this;
     }
 
-    public EntityBuilder<TEntity> LoadInto(string targetTable, string connectionString, int batchSize = 1000)
+    public EntityBuilder<TEntity> LoadInto(string targetTable, int batchSize = 1000)
     {
         Registration.LoadConfig = new LoadConfig
         {
             TargetTable = targetTable,
-            ConnectionString = connectionString,
+            BatchSize = batchSize
+        };
+        return this;
+    }
+
+    public EntityBuilder<TEntity> LoadInto(string targetTable, ITargetProvider provider, int batchSize = 1000)
+    {
+        Registration.LoadConfig = new LoadConfig
+        {
+            TargetTable = targetTable,
+            Provider = provider,
             BatchSize = batchSize
         };
         return this;
