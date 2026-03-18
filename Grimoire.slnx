@@ -6,4 +6,5 @@
   <Project Path="Grimoire.Observability.Metrics/Grimoire.Observability.Metrics.csproj" Id="32482378-6459-4db6-8b8c-14ecef9b1a62" />
   <Project Path="Grimoire.Observability.OpenTelemetry/Grimoire.Observability.OpenTelemetry.csproj" Id="902a5006-948a-4157-82b8-cffd0773f591" />
   <Project Path="Grimoire.Observability.SignalR/Grimoire.Observability.SignalR.csproj" Id="704bae16-7edb-448c-b704-efaceed94d0e" />
+  <Project Path="Grimoire.Core.Tests/Grimoire.Core.Tests.csproj" />
 </Solution>
