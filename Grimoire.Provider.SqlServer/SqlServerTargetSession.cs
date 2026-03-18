@@ -77,14 +77,10 @@ public sealed class SqlServerTargetSession : ITargetSession
         CancellationToken ct)
     {
         var selectClause = string.Join(", ", selectColumns.Select(c => $"[{c}]"));
-        var whereClauses = matchValues.Select((m, i) => $"[{m.Column}] = @p{i}");
-        var sql = $"SELECT {selectClause} FROM [{_targetTable}] WHERE {string.Join(" AND ", whereClauses)}";
+        var sql = $"SELECT {selectClause} FROM [{_targetTable}] WHERE {BuildWhereClause(matchValues, "p")}";
 
         await using var cmd = new SqlCommand(sql, _connection, _transaction);
-        for (int i = 0; i < matchValues.Count; i++)
-        {
-            cmd.Parameters.AddWithValue($"@p{i}", matchValues[i].Value ?? DBNull.Value);
-        }
+        AddWhereParameters(cmd, matchValues, "p");
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct))
@@ -134,18 +130,14 @@ public sealed class SqlServerTargetSession : ITargetSession
         CancellationToken ct)
     {
         var setClauses = string.Join(", ", setValues.Select((v, i) => $"[{v.Column}] = @s{i}"));
-        var whereClauses = string.Join(" AND ", whereValues.Select((v, i) => $"[{v.Column}] = @w{i}"));
-        var sql = $"UPDATE [{_targetTable}] SET {setClauses} WHERE {whereClauses}";
+        var sql = $"UPDATE [{_targetTable}] SET {setClauses} WHERE {BuildWhereClause(whereValues, "w")}";
 
         await using var cmd = new SqlCommand(sql, _connection, _transaction);
         for (int i = 0; i < setValues.Count; i++)
         {
             cmd.Parameters.AddWithValue($"@s{i}", setValues[i].Value ?? DBNull.Value);
         }
-        for (int i = 0; i < whereValues.Count; i++)
-        {
-            cmd.Parameters.AddWithValue($"@w{i}", whereValues[i].Value ?? DBNull.Value);
-        }
+        AddWhereParameters(cmd, whereValues, "w");
 
         await cmd.ExecuteNonQueryAsync(ct);
     }
@@ -155,14 +147,10 @@ public sealed class SqlServerTargetSession : ITargetSession
         IReadOnlyList<(string Column, object? Value)> matchValues,
         CancellationToken ct)
     {
-        var whereClauses = matchValues.Select((m, i) => $"[{m.Column}] = @p{i}");
-        var sql = $"SELECT [{keyColumn}] FROM [{_targetTable}] WHERE {string.Join(" AND ", whereClauses)}";
+        var sql = $"SELECT [{keyColumn}] FROM [{_targetTable}] WHERE {BuildWhereClause(matchValues, "p")}";
 
         await using var cmd = new SqlCommand(sql, _connection, _transaction);
-        for (int i = 0; i < matchValues.Count; i++)
-        {
-            cmd.Parameters.AddWithValue($"@p{i}", matchValues[i].Value ?? DBNull.Value);
-        }
+        AddWhereParameters(cmd, matchValues, "p");
 
         var result = await cmd.ExecuteScalarAsync(ct);
         return result is null or DBNull ? null : result;
@@ -182,5 +170,21 @@ public sealed class SqlServerTargetSession : ITargetSession
     {
         await _transaction.DisposeAsync();
         await _connection.DisposeAsync();
+    }
+
+    private static string BuildWhereClause(IReadOnlyList<(string Column, object? Value)> values, string paramPrefix)
+    {
+        var clauses = values.Select((v, i) =>
+            v.Value is null ? $"[{v.Column}] IS NULL" : $"[{v.Column}] = @{paramPrefix}{i}");
+        return string.Join(" AND ", clauses);
+    }
+
+    private static void AddWhereParameters(SqlCommand cmd, IReadOnlyList<(string Column, object? Value)> values, string paramPrefix)
+    {
+        for (int i = 0; i < values.Count; i++)
+        {
+            if (values[i].Value is not null)
+                cmd.Parameters.AddWithValue($"@{paramPrefix}{i}", values[i].Value);
+        }
     }
 }

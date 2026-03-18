@@ -72,6 +72,7 @@ public class EtlWorker(
                 .Entity<Responsibility>()
                     .TransformUsing<ResponsibilityMapping>()
                     .LoadInto("Responsibilities", batchSize: 500)
+                    .MatchOn(m => m.Columns("EmployeeId", "Title").WhenMatched(UpdateStrategy.OverwriteChanged))
                     .DependsOn<Employee>()
                     .Done()
 
