@@ -1,6 +1,6 @@
 # Grimoire
 
-A .NET ETL engine shipped as a single NuGet package. Grimoire handles transform, load, and orchestration — callers own their source and target connections.
+A .NET ETL engine shipped as a NuGet package. Grimoire handles transform, load, and orchestration — callers own their source and target connections.
 
 ## How It Works
 
@@ -8,29 +8,32 @@ An external app provides:
 
 1. **A connector** — implements `IConnector` (DB sources with schema declaration) or `ICustomExtractor` (APIs, files, queues)
 2. **Mapping config** — fluent `GrimoireMapping<T>` classes with type-safe property expressions
-3. **Load config** — target table, connection string, and batch size
+3. **A target provider** — implements `ITargetProvider` (e.g., `SqlServerTargetProvider`) to handle database-specific load operations
 
-Grimoire streams data from the source, applies mappings (including FK resolution via an in-memory key map), and bulk loads into the target database. Results are returned to the caller.
+Grimoire streams data from the source, applies mappings (including FK resolution via an in-memory key map), and loads into the target database through the provider abstraction. Results are returned to the caller.
 
 ## Quick Example
 
 ```csharp
+var target = new SqlServerTargetProvider(targetConnectionString);
+
 var result = await new GrimoirePipeline()
     .ExtractFrom(new LegacyConnector(sourceConnectionString))
+    .LoadWith(target)
     .AddLogging(loggerFactory)
     .AddMetrics()
     .AddTracing()
 
     .Entity<Department>()
         .TransformUsing<DepartmentMapping>()
-        .LoadInto("Departments", targetConnStr, batchSize: 100)
+        .LoadInto("Departments", batchSize: 100)
         .MatchOn(m => m.Columns("Name").WhenMatched(UpdateStrategy.Skip))
         .TrackKey("Id", "DeptName")
         .Done()
 
     .Entity<Employee>()
         .TransformUsing<EmployeeMapping>()
-        .LoadInto("Employees", targetConnStr, batchSize: 500)
+        .LoadInto("Employees", batchSize: 500)
         .MatchOn(m => m.Columns("Email").WhenMatched(UpdateStrategy.OverwriteChanged))
         .DependsOn<Department>()
         .TrackKey("Id", "EmpId")
@@ -38,16 +41,41 @@ var result = await new GrimoirePipeline()
 
     .Entity<Responsibility>()
         .TransformUsing<ResponsibilityMapping>()
-        .LoadInto("Responsibilities", targetConnStr, batchSize: 500)
+        .LoadInto("Responsibilities", batchSize: 500)
+        .MatchOn(m => m.Columns("EmployeeId", "Title").WhenMatched(UpdateStrategy.OverwriteChanged))
         .DependsOn<Employee>()
         .Done()
 
     .ExecuteAsync(cancellationToken);
 ```
 
+## Target Provider
+
+The target provider abstracts away database-specific load operations. Grimoire.Core defines two interfaces — `ITargetProvider` (factory) and `ITargetSession` (operations) — and provider packages implement them.
+
+```csharp
+// Pipeline-level target (common case: all entities go to same DB)
+var target = new SqlServerTargetProvider(targetConnStr);
+pipeline.LoadWith(target);
+
+// Per-entity override (e.g., one entity goes to a different DB)
+pipeline.Entity<AuditLog>()
+    .TransformUsing<AuditMapping>()
+    .LoadInto("audit_logs", differentProvider)
+    .Done();
+```
+
+**Available providers:**
+
+| Package | Target |
+|---------|--------|
+| **Grimoire.Provider.SqlServer** | SQL Server via `SqlBulkCopy`, `OUTPUT INSERTED`, `sys.columns` |
+
+Future: Postgres, Oracle, MySQL, MongoDB.
+
 ## Connector
 
-The connector describes the source database schema. Grimoire generates SQL queries automatically based on the schema and each mapping's `FromTables()` declaration.
+The connector describes the source database schema. Grimoire generates SQL queries automatically based on the schema and each mapping's `FromTables()` declaration. Identifier quoting adapts to the source database provider (brackets for SQL Server, double quotes for Postgres/Oracle, backticks for MySQL).
 
 ```csharp
 public class LegacyConnector(string connectionString) : IConnector
@@ -106,9 +134,11 @@ public class EmployeeMapping : GrimoireMapping<Employee>
 | Feature | Description |
 |---------|-------------|
 | **`ExtractFrom(connector)`** | Set the source database connector for all entities |
+| **`LoadWith(provider)`** | Set the default target provider for all entities |
 | **`Entity<T>()`** | Register an entity for ETL processing |
 | **`TransformUsing<TMapping>()`** | Apply a mapping class to transform source rows |
-| **`LoadInto(table, connStr, batchSize)`** | Configure target table and batch size for `SqlBulkCopy` |
+| **`LoadInto(table, batchSize)`** | Configure target table and batch size (uses pipeline default provider) |
+| **`LoadInto(table, provider, batchSize)`** | Configure target table with a per-entity provider override |
 | **`MatchOn(m => m.Columns(...))`** | Upsert: declare business keys for duplicate detection |
 | **`WhenMatched(strategy)`** | `OverwriteAll`, `OverwriteChanged`, or `Skip` |
 | **`DependsOn<T>()`** | Declare execution order; Grimoire topologically sorts |
@@ -146,6 +176,7 @@ The `Grimoire.Demo` project is a complete working example using .NET Aspire for 
 **What it demonstrates:**
 
 - `IConnector` implementation with `ConfigureSchema` (multi-table with joins)
+- `SqlServerTargetProvider` with pipeline-level `LoadWith()` for target database
 - 3-tier dependency chain: Department -> Employee -> Responsibility
 - `TrackKey` + `AsForeignKey` for FK resolution across entities
 - `MatchOn` with different upsert strategies (`Skip`, `OverwriteChanged`)
