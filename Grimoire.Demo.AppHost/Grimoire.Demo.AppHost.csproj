@@ -1,0 +1,19 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.1.2">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>c59d16e4-7031-4034-8a56-0c6461d557ae</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.SqlServer" Version="13.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Grimoire.Demo\Grimoire.Demo.csproj" />
+  </ItemGroup>
+
+</Project>

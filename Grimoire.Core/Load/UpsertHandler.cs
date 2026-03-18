@@ -8,6 +8,7 @@ internal sealed class UpsertHandler
     private readonly MatchConfig _matchConfig;
     private readonly string _targetTable;
     private readonly List<PropertyInfo> _properties;
+    private HashSet<string>? _identityColumns;
 
     public UpsertHandler(MatchConfig matchConfig, string targetTable, List<PropertyInfo> properties)
     {
@@ -22,6 +23,8 @@ internal sealed class UpsertHandler
         List<TEntity> batch,
         CancellationToken cancellationToken) where TEntity : class
     {
+        var identityColumns = await GetIdentityColumnsAsync(connection, transaction, cancellationToken);
+
         var matchProps = _properties
             .Where(p => _matchConfig.MatchColumns.Contains(p.Name, StringComparer.OrdinalIgnoreCase))
             .ToList();
@@ -29,6 +32,19 @@ internal sealed class UpsertHandler
         var nonMatchProps = _properties
             .Where(p => !_matchConfig.MatchColumns.Contains(p.Name, StringComparer.OrdinalIgnoreCase))
             .ToList();
+
+        // Properties to write (exclude identity columns)
+        var insertProps = _properties
+            .Where(p => !identityColumns.Contains(p.Name))
+            .ToList();
+
+        var updateProps = nonMatchProps
+            .Where(p => !identityColumns.Contains(p.Name))
+            .ToList();
+
+        // Identity property for reading back generated values
+        var identityProp = _properties
+            .FirstOrDefault(p => identityColumns.Contains(p.Name));
 
         int inserted = 0, updated = 0, skipped = 0;
 
@@ -40,33 +56,63 @@ internal sealed class UpsertHandler
 
             if (existingRow is null)
             {
-                await InsertRowAsync(connection, transaction, entity, cancellationToken);
+                await InsertRowAsync(connection, transaction, entity, insertProps, identityProp, cancellationToken);
                 inserted++;
             }
-            else if (_matchConfig.WhenMatchedStrategy == UpdateStrategy.Skip)
+            else
             {
-                skipped++;
-            }
-            else if (_matchConfig.WhenMatchedStrategy == UpdateStrategy.OverwriteChanged)
-            {
-                if (HasChanges(entity, existingRow, nonMatchProps))
-                {
-                    await UpdateRowAsync(connection, transaction, matchProps, nonMatchProps, entity, cancellationToken);
-                    updated++;
-                }
-                else
+                // Set identity value from existing row so key tracking works
+                if (identityProp is not null && existingRow.TryGetValue(identityProp.Name, out var existingId) && existingId is not null)
+                    identityProp.SetValue(entity, Convert.ChangeType(existingId, identityProp.PropertyType));
+
+                if (_matchConfig.WhenMatchedStrategy == UpdateStrategy.Skip)
                 {
                     skipped++;
                 }
-            }
-            else // OverwriteAll
-            {
-                await UpdateRowAsync(connection, transaction, matchProps, nonMatchProps, entity, cancellationToken);
-                updated++;
+                else if (_matchConfig.WhenMatchedStrategy == UpdateStrategy.OverwriteChanged)
+                {
+                    if (HasChanges(entity, existingRow, updateProps))
+                    {
+                        await UpdateRowAsync(connection, transaction, matchProps, updateProps, entity, cancellationToken);
+                        updated++;
+                    }
+                    else
+                    {
+                        skipped++;
+                    }
+                }
+                else // OverwriteAll
+                {
+                    await UpdateRowAsync(connection, transaction, matchProps, updateProps, entity, cancellationToken);
+                    updated++;
+                }
             }
         }
 
         return (inserted, updated, skipped);
+    }
+
+    private async Task<HashSet<string>> GetIdentityColumnsAsync(
+        SqlConnection connection,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        if (_identityColumns is not null) return _identityColumns;
+
+        _identityColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await using var cmd = new SqlCommand(
+            "SELECT c.name FROM sys.columns c WHERE c.object_id = OBJECT_ID(@table) AND c.is_identity = 1",
+            connection, transaction);
+        cmd.Parameters.AddWithValue("@table", _targetTable);
+
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            _identityColumns.Add(reader.GetString(0));
+        }
+
+        return _identityColumns;
     }
 
     private async Task<Dictionary<string, object?>?> FindExistingRowAsync<TEntity>(
@@ -104,20 +150,36 @@ internal sealed class UpsertHandler
         SqlConnection connection,
         SqlTransaction transaction,
         TEntity entity,
+        List<PropertyInfo> insertProps,
+        PropertyInfo? identityProp,
         CancellationToken cancellationToken) where TEntity : class
     {
-        var columns = _properties.Select(p => $"[{p.Name}]");
-        var paramNames = _properties.Select((_, i) => $"@p{i}");
-        var sql = $"INSERT INTO [{_targetTable}] ({string.Join(", ", columns)}) VALUES ({string.Join(", ", paramNames)})";
+        var columns = insertProps.Select(p => $"[{p.Name}]");
+        var paramNames = insertProps.Select((_, i) => $"@p{i}");
+
+        string sql;
+        if (identityProp is not null)
+            sql = $"INSERT INTO [{_targetTable}] ({string.Join(", ", columns)}) OUTPUT INSERTED.[{identityProp.Name}] VALUES ({string.Join(", ", paramNames)})";
+        else
+            sql = $"INSERT INTO [{_targetTable}] ({string.Join(", ", columns)}) VALUES ({string.Join(", ", paramNames)})";
 
         await using var cmd = new SqlCommand(sql, connection, transaction);
-        for (int i = 0; i < _properties.Count; i++)
+        for (int i = 0; i < insertProps.Count; i++)
         {
-            var value = _properties[i].GetValue(entity);
+            var value = insertProps[i].GetValue(entity);
             cmd.Parameters.AddWithValue($"@p{i}", value ?? DBNull.Value);
         }
 
-        await cmd.ExecuteNonQueryAsync(cancellationToken);
+        if (identityProp is not null)
+        {
+            var generatedId = await cmd.ExecuteScalarAsync(cancellationToken);
+            if (generatedId is not null and not DBNull)
+                identityProp.SetValue(entity, Convert.ChangeType(generatedId, identityProp.PropertyType));
+        }
+        else
+        {
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
     }
 
     private async Task UpdateRowAsync<TEntity>(

@@ -50,13 +50,19 @@ internal sealed class BulkLoader
 
         try
         {
+            // Detect identity columns to exclude from INSERT statements
+            var identityColumns = await GetIdentityColumnsAsync(connection, transaction, cancellationToken);
+
             if (_matchConfig is not null && _matchConfig.MatchColumns.Count > 0)
             {
                 await LoadWithUpsertAsync(entities, connection, transaction, properties, result, onRowError, onProgress, onBatchLoaded, cancellationToken);
             }
             else
             {
-                await LoadWithBulkCopyAsync(entities, connection, transaction, properties, result, onRowError, onProgress, onBatchLoaded, cancellationToken);
+                var insertProperties = properties
+                    .Where(p => !identityColumns.Contains(p.Name))
+                    .ToList();
+                await LoadWithBulkCopyAsync(entities, connection, transaction, properties, insertProperties, result, onRowError, onProgress, onBatchLoaded, cancellationToken);
             }
 
             await transaction.CommitAsync(cancellationToken);
@@ -70,11 +76,33 @@ internal sealed class BulkLoader
         return result;
     }
 
+    private async Task<HashSet<string>> GetIdentityColumnsAsync(
+        SqlConnection connection,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        var identityColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await using var cmd = new SqlCommand(
+            "SELECT c.name FROM sys.columns c WHERE c.object_id = OBJECT_ID(@table) AND c.is_identity = 1",
+            connection, transaction);
+        cmd.Parameters.AddWithValue("@table", _loadConfig.TargetTable);
+
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            identityColumns.Add(reader.GetString(0));
+        }
+
+        return identityColumns;
+    }
+
     private async Task LoadWithBulkCopyAsync<TEntity>(
         IAsyncEnumerable<(TEntity Entity, object? LegacyKey)> entities,
         SqlConnection connection,
         SqlTransaction transaction,
         List<PropertyInfo> properties,
+        List<PropertyInfo> insertProperties,
         EntityResult result,
         Action<RowError>? onRowError,
         Action<int>? onProgress,
@@ -92,7 +120,7 @@ internal sealed class BulkLoader
                 batchNumber++;
                 var insertedBefore = result.RowsInserted;
                 var sw = Stopwatch.StartNew();
-                await FlushBulkCopyBatchAsync(batch, connection, transaction, properties, result, cancellationToken);
+                await FlushBulkCopyBatchAsync(batch, connection, transaction, properties, insertProperties, result, cancellationToken);
                 sw.Stop();
                 onBatchLoaded?.Invoke(new BatchResult(
                     result.EntityName, batchNumber, batch.Count,
@@ -108,7 +136,7 @@ internal sealed class BulkLoader
             batchNumber++;
             var insertedBefore = result.RowsInserted;
             var sw = Stopwatch.StartNew();
-            await FlushBulkCopyBatchAsync(batch, connection, transaction, properties, result, cancellationToken);
+            await FlushBulkCopyBatchAsync(batch, connection, transaction, properties, insertProperties, result, cancellationToken);
             sw.Stop();
             onBatchLoaded?.Invoke(new BatchResult(
                 result.EntityName, batchNumber, batch.Count,
@@ -122,12 +150,13 @@ internal sealed class BulkLoader
         List<(TEntity Entity, object? LegacyKey)> batch,
         SqlConnection connection,
         SqlTransaction transaction,
-        List<PropertyInfo> properties,
+        List<PropertyInfo> allProperties,
+        List<PropertyInfo> insertProperties,
         EntityResult result,
         CancellationToken cancellationToken) where TEntity : class, new()
     {
         var table = new DataTable();
-        foreach (var prop in properties)
+        foreach (var prop in insertProperties)
         {
             var colType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
             table.Columns.Add(prop.Name, colType);
@@ -136,7 +165,7 @@ internal sealed class BulkLoader
         foreach (var (entity, _) in batch)
         {
             var row = table.NewRow();
-            foreach (var prop in properties)
+            foreach (var prop in insertProperties)
             {
                 row[prop.Name] = prop.GetValue(entity) ?? DBNull.Value;
             }
@@ -149,7 +178,7 @@ internal sealed class BulkLoader
             BatchSize = _loadConfig.BatchSize
         };
 
-        foreach (var prop in properties)
+        foreach (var prop in insertProperties)
         {
             bulkCopy.ColumnMappings.Add(prop.Name, prop.Name);
         }
@@ -160,7 +189,7 @@ internal sealed class BulkLoader
         // Track keys after insert
         if (_trackKeyProperty is not null)
         {
-            await TrackInsertedKeysAsync(batch, connection, transaction, properties, cancellationToken);
+            await TrackInsertedKeysAsync(batch, connection, transaction, allProperties, cancellationToken);
         }
     }
 

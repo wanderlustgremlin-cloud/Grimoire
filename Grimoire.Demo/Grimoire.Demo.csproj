@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-Grimoire.Demo-1230ac43-3d94-4381-bfd8-3742eeb44d4e</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Microsoft.Data.SqlClient" Version="13.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Grimoire.Core\Grimoire.Core.csproj" />
+    <ProjectReference Include="..\Grimoire.Demo.ServiceDefaults\Grimoire.Demo.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\Grimoire.Observability.Logging\Grimoire.Observability.Logging.csproj" />
+    <ProjectReference Include="..\Grimoire.Observability.Metrics\Grimoire.Observability.Metrics.csproj" />
+    <ProjectReference Include="..\Grimoire.Observability.OpenTelemetry\Grimoire.Observability.OpenTelemetry.csproj" />
+  </ItemGroup>
+
+</Project>
