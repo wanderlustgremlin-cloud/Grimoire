@@ -37,6 +37,9 @@ public class EtlWorker(
             logger.LogInformation("Starting ETL pipeline...");
 
             var result = await new GrimoirePipeline()
+                // Source database connector
+                .ExtractFrom(new LegacyConnector(legacyConnStr))
+
                 // Observability — visible in Aspire dashboard
                 .AddLogging(loggerFactory)
                 .AddMetrics()
@@ -44,7 +47,6 @@ public class EtlWorker(
 
                 // Entity: Departments (extracted first, no dependencies)
                 .Entity<Department>()
-                    .ExtractUsing(new LegacyDepartmentExtractor(legacyConnStr))
                     .TransformUsing<DepartmentMapping>()
                     .LoadInto("Departments", targetConnStr, batchSize: 100)
                     .MatchOn(m => m.Columns("Name").WhenMatched(UpdateStrategy.Skip))
@@ -53,10 +55,18 @@ public class EtlWorker(
 
                 // Entity: Employees (depends on Departments for FK resolution)
                 .Entity<Employee>()
-                    .ExtractUsing(new LegacyEmployeeExtractor(legacyConnStr))
                     .TransformUsing<EmployeeMapping>()
                     .LoadInto("Employees", targetConnStr, batchSize: 500)
+                    .MatchOn(m => m.Columns("Email").WhenMatched(UpdateStrategy.OverwriteChanged))
                     .DependsOn<Department>()
+                    .TrackKey("Id", "EmpId")
+                    .Done()
+
+                // Entity: Responsibilities (depends on Employees for FK resolution)
+                .Entity<Responsibility>()
+                    .TransformUsing<ResponsibilityMapping>()
+                    .LoadInto("Responsibilities", targetConnStr, batchSize: 500)
+                    .DependsOn<Employee>()
                     .Done()
 
                 .ExecuteAsync(stoppingToken);
@@ -102,22 +112,28 @@ public class EtlWorker(
         cmd.CommandText = "SELECT COUNT(*) FROM Employees";
         var empCount = (int)(await cmd.ExecuteScalarAsync(cancellationToken))!;
 
-        cmd.CommandText = """
-            SELECT e.FirstName, e.LastName, d.Name AS Department
-            FROM Employees e
-            JOIN Departments d ON e.DepartmentId = d.Id
-            ORDER BY d.Name, e.LastName
-            """;
+        cmd.CommandText = "SELECT COUNT(*) FROM Responsibilities";
+        var respCount = (int)(await cmd.ExecuteScalarAsync(cancellationToken))!;
 
         logger.LogInformation("=== Target Database Verification ===");
         logger.LogInformation("Departments: {Count}", deptCount);
         logger.LogInformation("Employees: {Count}", empCount);
+        logger.LogInformation("Responsibilities: {Count}", respCount);
+
+        cmd.CommandText = """
+            SELECT e.FirstName, e.LastName, d.Name AS Department, r.Title
+            FROM Employees e
+            JOIN Departments d ON e.DepartmentId = d.Id
+            LEFT JOIN Responsibilities r ON r.EmployeeId = e.Id
+            ORDER BY d.Name, e.LastName, r.Title
+            """;
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            logger.LogInformation("  {FirstName} {LastName} — {Department}",
-                reader["FirstName"], reader["LastName"], reader["Department"]);
+            var title = reader.IsDBNull(reader.GetOrdinal("Title")) ? "(none)" : reader["Title"];
+            logger.LogInformation("  {FirstName} {LastName} — {Department} — {Title}",
+                reader["FirstName"], reader["LastName"], reader["Department"], title);
         }
     }
 }

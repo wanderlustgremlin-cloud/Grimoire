@@ -55,6 +55,11 @@ internal sealed class EntityRegistration
 
         var executor = new MappingExecutor<TEntity>(built.Mappings, keyMap, EntityName);
 
+        // Build source column list — include TrackKey legacy column if not already mapped
+        var sourceColumns = built.Mappings.Select(m => m.SourceColumn).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (TrackKeyLegacyColumn is not null && !sourceColumns.Contains(TrackKeyLegacyColumn, StringComparer.OrdinalIgnoreCase))
+            sourceColumns.Add(TrackKeyLegacyColumn);
+
         // Extract
         IAsyncEnumerable<SourceRow> sourceRows;
         if (CustomExtractor is not null)
@@ -63,7 +68,7 @@ internal sealed class EntityRegistration
             {
                 EntityName = EntityName,
                 SourceTables = built.SourceTables,
-                SourceColumns = built.Mappings.Select(m => m.SourceColumn).ToList()
+                SourceColumns = sourceColumns
             };
             sourceRows = CustomExtractor.ExtractAsync(request, cancellationToken);
         }
@@ -74,7 +79,7 @@ internal sealed class EntityRegistration
             {
                 EntityName = EntityName,
                 SourceTables = built.SourceTables,
-                SourceColumns = built.Mappings.Select(m => m.SourceColumn).ToList()
+                SourceColumns = sourceColumns
             };
             sourceRows = extractorBridge.ExtractAsync(request, cancellationToken);
         }

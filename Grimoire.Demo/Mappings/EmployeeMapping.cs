@@ -7,6 +7,8 @@ public class EmployeeMapping : GrimoireMapping<Employee>
 {
     public override void Configure(IMappingBuilder<Employee> builder)
     {
+        builder.FromTables("LegacyEmployees");
+
         builder.Map(e => e.FirstName, "FullName")
             .Convert(v =>
             {
