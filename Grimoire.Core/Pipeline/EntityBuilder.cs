@@ -60,10 +60,13 @@ public sealed class EntityBuilder<TEntity> where TEntity : class, new()
         return this;
     }
 
-    public EntityBuilder<TEntity> TrackKey(string targetKeyProperty, string legacyKeyColumn)
+    public EntityBuilder<TEntity> TrackKey(string targetKeyProperty, string legacyKeyColumn,
+        Func<object>? generate = null, bool dbGenerated = false)
     {
         Registration.TrackKeyProperty = targetKeyProperty;
         Registration.TrackKeyLegacyColumn = legacyKeyColumn;
+        Registration.TrackKeyGenerator = generate;
+        Registration.TrackKeyDbGenerated = dbGenerated;
         return this;
     }
 

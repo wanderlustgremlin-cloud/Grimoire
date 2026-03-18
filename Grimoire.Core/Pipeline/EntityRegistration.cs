@@ -16,6 +16,8 @@ internal sealed class EntityRegistration
     public List<Type> Dependencies { get; } = [];
     public string? TrackKeyProperty { get; set; }
     public string? TrackKeyLegacyColumn { get; set; }
+    public Func<object>? TrackKeyGenerator { get; set; }
+    public bool TrackKeyDbGenerated { get; set; }
 
     public async Task<EntityResult> ExecuteAsync(
         IConnector? connector,
@@ -89,7 +91,16 @@ internal sealed class EntityRegistration
         }
 
         // Transform + Load (streaming)
-        var loader = new BulkLoader(LoadConfig, MatchConfig, keyMap, EntityType, TrackKeyProperty, TrackKeyLegacyColumn);
+        var loader = new BulkLoader(LoadConfig, MatchConfig, keyMap, EntityType,
+            TrackKeyProperty, TrackKeyLegacyColumn, TrackKeyGenerator is not null, TrackKeyDbGenerated);
+
+        // Cache the key property setter for app-generated keys
+        System.Reflection.PropertyInfo? generatorKeyProp = null;
+        if (TrackKeyGenerator is not null && TrackKeyProperty is not null)
+        {
+            generatorKeyProp = typeof(TEntity).GetProperty(TrackKeyProperty,
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+        }
 
         async IAsyncEnumerable<(TEntity Entity, object? LegacyKey)> TransformStream()
         {
@@ -105,6 +116,13 @@ internal sealed class EntityRegistration
                     foreach (var observer in observers)
                         observer.OnRowError(error);
                     continue;
+                }
+
+                // App-generated key: generate and set on entity before load
+                if (TrackKeyGenerator is not null && generatorKeyProp is not null)
+                {
+                    var generated = TrackKeyGenerator();
+                    generatorKeyProp.SetValue(entity, generated);
                 }
 
                 object? legacyKey = TrackKeyLegacyColumn is not null ? row[TrackKeyLegacyColumn] : null;

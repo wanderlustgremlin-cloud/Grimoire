@@ -14,6 +14,8 @@ internal sealed class BulkLoader
     private readonly Type _entityType;
     private readonly string? _trackKeyProperty;
     private readonly string? _trackKeyLegacyColumn;
+    private readonly bool _trackKeyAppGenerated;
+    private readonly bool _trackKeyDbGenerated;
 
     public BulkLoader(
         LoadConfig loadConfig,
@@ -21,7 +23,9 @@ internal sealed class BulkLoader
         KeyMap.KeyMap keyMap,
         Type entityType,
         string? trackKeyProperty,
-        string? trackKeyLegacyColumn)
+        string? trackKeyLegacyColumn,
+        bool trackKeyAppGenerated = false,
+        bool trackKeyDbGenerated = false)
     {
         _loadConfig = loadConfig;
         _matchConfig = matchConfig;
@@ -29,6 +33,8 @@ internal sealed class BulkLoader
         _entityType = entityType;
         _trackKeyProperty = trackKeyProperty;
         _trackKeyLegacyColumn = trackKeyLegacyColumn;
+        _trackKeyAppGenerated = trackKeyAppGenerated;
+        _trackKeyDbGenerated = trackKeyDbGenerated;
     }
 
     public async Task<EntityResult> LoadAsync<TEntity>(
@@ -50,17 +56,27 @@ internal sealed class BulkLoader
 
         try
         {
-            // Detect identity columns to exclude from INSERT statements
-            var identityColumns = await GetIdentityColumnsAsync(connection, transaction, cancellationToken);
+            // Detect columns to exclude from INSERT:
+            // - DB identity columns (auto-detected via sys.columns)
+            // - dbGenerated columns (user-flagged, e.g. DEFAULT NEWID())
+            // - But NOT app-generated columns (user provides value before INSERT)
+            var generatedColumns = await GetIdentityColumnsAsync(connection, transaction, cancellationToken);
+
+            if (_trackKeyDbGenerated && _trackKeyProperty is not null)
+                generatedColumns.Add(_trackKeyProperty);
+
+            // App-generated keys have their value set before INSERT, so don't exclude them
+            if (_trackKeyAppGenerated && _trackKeyProperty is not null)
+                generatedColumns.Remove(_trackKeyProperty);
 
             if (_matchConfig is not null && _matchConfig.MatchColumns.Count > 0)
             {
-                await LoadWithUpsertAsync(entities, connection, transaction, properties, result, onRowError, onProgress, onBatchLoaded, cancellationToken);
+                await LoadWithUpsertAsync(entities, connection, transaction, properties, generatedColumns, result, onRowError, onProgress, onBatchLoaded, cancellationToken);
             }
             else
             {
                 var insertProperties = properties
-                    .Where(p => !identityColumns.Contains(p.Name))
+                    .Where(p => !generatedColumns.Contains(p.Name))
                     .ToList();
                 await LoadWithBulkCopyAsync(entities, connection, transaction, properties, insertProperties, result, onRowError, onProgress, onBatchLoaded, cancellationToken);
             }
@@ -254,13 +270,14 @@ internal sealed class BulkLoader
         SqlConnection connection,
         SqlTransaction transaction,
         List<PropertyInfo> properties,
+        HashSet<string> generatedColumns,
         EntityResult result,
         Action<RowError>? onRowError,
         Action<int>? onProgress,
         Action<BatchResult>? onBatchLoaded,
         CancellationToken cancellationToken) where TEntity : class, new()
     {
-        var handler = new UpsertHandler(_matchConfig!, _loadConfig.TargetTable, properties);
+        var handler = new UpsertHandler(_matchConfig!, _loadConfig.TargetTable, properties, generatedColumns);
         var batch = new List<TEntity>();
         var batchKeys = new List<object?>();
         var batchNumber = 0;

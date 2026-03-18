@@ -107,6 +107,40 @@ public class EntityBuilderTests
     }
 
     [Fact]
+    public void TrackKey_defaults_to_no_generator_and_not_db_generated()
+    {
+        var pipeline = new GrimoirePipeline();
+        var builder = pipeline.Entity<Customer>()
+            .TrackKey("Id", "legacy_id");
+
+        Assert.Null(builder.Registration.TrackKeyGenerator);
+        Assert.False(builder.Registration.TrackKeyDbGenerated);
+    }
+
+    [Fact]
+    public void TrackKey_with_generate_sets_generator()
+    {
+        Func<object> generator = () => Guid.NewGuid();
+        var pipeline = new GrimoirePipeline();
+        var builder = pipeline.Entity<Customer>()
+            .TrackKey("Id", "legacy_id", generate: generator);
+
+        Assert.Same(generator, builder.Registration.TrackKeyGenerator);
+        Assert.False(builder.Registration.TrackKeyDbGenerated);
+    }
+
+    [Fact]
+    public void TrackKey_with_dbGenerated_sets_flag()
+    {
+        var pipeline = new GrimoirePipeline();
+        var builder = pipeline.Entity<Customer>()
+            .TrackKey("Id", "legacy_id", dbGenerated: true);
+
+        Assert.Null(builder.Registration.TrackKeyGenerator);
+        Assert.True(builder.Registration.TrackKeyDbGenerated);
+    }
+
+    [Fact]
     public void MatchOn_sets_match_config()
     {
         var pipeline = new GrimoirePipeline();

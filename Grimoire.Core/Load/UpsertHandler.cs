@@ -8,13 +8,14 @@ internal sealed class UpsertHandler
     private readonly MatchConfig _matchConfig;
     private readonly string _targetTable;
     private readonly List<PropertyInfo> _properties;
-    private HashSet<string>? _identityColumns;
+    private readonly HashSet<string> _generatedColumns;
 
-    public UpsertHandler(MatchConfig matchConfig, string targetTable, List<PropertyInfo> properties)
+    public UpsertHandler(MatchConfig matchConfig, string targetTable, List<PropertyInfo> properties, HashSet<string> generatedColumns)
     {
         _matchConfig = matchConfig;
         _targetTable = targetTable;
         _properties = properties;
+        _generatedColumns = generatedColumns;
     }
 
     public async Task<(int Inserted, int Updated, int Skipped)> UpsertBatchAsync<TEntity>(
@@ -23,8 +24,6 @@ internal sealed class UpsertHandler
         List<TEntity> batch,
         CancellationToken cancellationToken) where TEntity : class
     {
-        var identityColumns = await GetIdentityColumnsAsync(connection, transaction, cancellationToken);
-
         var matchProps = _properties
             .Where(p => _matchConfig.MatchColumns.Contains(p.Name, StringComparer.OrdinalIgnoreCase))
             .ToList();
@@ -33,18 +32,18 @@ internal sealed class UpsertHandler
             .Where(p => !_matchConfig.MatchColumns.Contains(p.Name, StringComparer.OrdinalIgnoreCase))
             .ToList();
 
-        // Properties to write (exclude identity columns)
+        // Properties to write (exclude generated columns)
         var insertProps = _properties
-            .Where(p => !identityColumns.Contains(p.Name))
+            .Where(p => !_generatedColumns.Contains(p.Name))
             .ToList();
 
         var updateProps = nonMatchProps
-            .Where(p => !identityColumns.Contains(p.Name))
+            .Where(p => !_generatedColumns.Contains(p.Name))
             .ToList();
 
-        // Identity property for reading back generated values
-        var identityProp = _properties
-            .FirstOrDefault(p => identityColumns.Contains(p.Name));
+        // Generated property for reading back DB-generated values (identity or DEFAULT)
+        var generatedProp = _properties
+            .FirstOrDefault(p => _generatedColumns.Contains(p.Name));
 
         int inserted = 0, updated = 0, skipped = 0;
 
@@ -56,14 +55,14 @@ internal sealed class UpsertHandler
 
             if (existingRow is null)
             {
-                await InsertRowAsync(connection, transaction, entity, insertProps, identityProp, cancellationToken);
+                await InsertRowAsync(connection, transaction, entity, insertProps, generatedProp, cancellationToken);
                 inserted++;
             }
             else
             {
                 // Set identity value from existing row so key tracking works
-                if (identityProp is not null && existingRow.TryGetValue(identityProp.Name, out var existingId) && existingId is not null)
-                    identityProp.SetValue(entity, Convert.ChangeType(existingId, identityProp.PropertyType));
+                if (generatedProp is not null && existingRow.TryGetValue(generatedProp.Name, out var existingId) && existingId is not null)
+                    generatedProp.SetValue(entity, Convert.ChangeType(existingId, generatedProp.PropertyType));
 
                 if (_matchConfig.WhenMatchedStrategy == UpdateStrategy.Skip)
                 {
@@ -90,29 +89,6 @@ internal sealed class UpsertHandler
         }
 
         return (inserted, updated, skipped);
-    }
-
-    private async Task<HashSet<string>> GetIdentityColumnsAsync(
-        SqlConnection connection,
-        SqlTransaction transaction,
-        CancellationToken cancellationToken)
-    {
-        if (_identityColumns is not null) return _identityColumns;
-
-        _identityColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        await using var cmd = new SqlCommand(
-            "SELECT c.name FROM sys.columns c WHERE c.object_id = OBJECT_ID(@table) AND c.is_identity = 1",
-            connection, transaction);
-        cmd.Parameters.AddWithValue("@table", _targetTable);
-
-        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            _identityColumns.Add(reader.GetString(0));
-        }
-
-        return _identityColumns;
     }
 
     private async Task<Dictionary<string, object?>?> FindExistingRowAsync<TEntity>(
@@ -151,15 +127,15 @@ internal sealed class UpsertHandler
         SqlTransaction transaction,
         TEntity entity,
         List<PropertyInfo> insertProps,
-        PropertyInfo? identityProp,
+        PropertyInfo? generatedProp,
         CancellationToken cancellationToken) where TEntity : class
     {
         var columns = insertProps.Select(p => $"[{p.Name}]");
         var paramNames = insertProps.Select((_, i) => $"@p{i}");
 
         string sql;
-        if (identityProp is not null)
-            sql = $"INSERT INTO [{_targetTable}] ({string.Join(", ", columns)}) OUTPUT INSERTED.[{identityProp.Name}] VALUES ({string.Join(", ", paramNames)})";
+        if (generatedProp is not null)
+            sql = $"INSERT INTO [{_targetTable}] ({string.Join(", ", columns)}) OUTPUT INSERTED.[{generatedProp.Name}] VALUES ({string.Join(", ", paramNames)})";
         else
             sql = $"INSERT INTO [{_targetTable}] ({string.Join(", ", columns)}) VALUES ({string.Join(", ", paramNames)})";
 
@@ -170,11 +146,11 @@ internal sealed class UpsertHandler
             cmd.Parameters.AddWithValue($"@p{i}", value ?? DBNull.Value);
         }
 
-        if (identityProp is not null)
+        if (generatedProp is not null)
         {
             var generatedId = await cmd.ExecuteScalarAsync(cancellationToken);
             if (generatedId is not null and not DBNull)
-                identityProp.SetValue(entity, Convert.ChangeType(generatedId, identityProp.PropertyType));
+                generatedProp.SetValue(entity, Convert.ChangeType(generatedId, generatedProp.PropertyType));
         }
         else
         {
