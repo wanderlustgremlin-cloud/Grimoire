@@ -248,6 +248,67 @@ var source = new OracleEbsConnector(oracleConnStr, EbsVersion.R121, modules =>
 
 **Supported versions:** `R11i`, `R12`, `R121`, `R122` — columns and joins that don't exist in your version are automatically excluded.
 
+### Microsoft Dynamics 365 Business Central
+
+`Grimoire.Connector.BusinessCentral` provides an API-based extractor (`ICustomExtractor`) for Business Central's OData endpoints. Supports API versions v1.0 and v2.0 with version-aware field filtering and automatic pagination.
+
+```csharp
+var bc = new BusinessCentralExtractor(
+    environmentUrl: "https://api.businesscentral.dynamics.com/v2.0/tenant/production",
+    version: BcApiVersion.V2_0,
+    companyId: Guid.Parse("..."),
+    httpClient: authConfiguredHttpClient,   // caller owns auth (OAuth2/bearer token)
+    modules =>
+    {
+        modules.Sales();
+        modules.Purchasing();
+        modules.Financials();
+    }
+);
+
+var result = await new GrimoirePipeline()
+    .LoadWith(new SqlServerTargetProvider(targetConnStr))
+
+    .Entity<Customer>()
+        .ExtractUsing(bc)                   // same extractor for all entities
+        .TransformUsing<CustomerMapping>()
+        .LoadInto("Customers")
+        .Done()
+
+    .Entity<SalesInvoice>()
+        .ExtractUsing(bc)
+        .TransformUsing<InvoiceMapping>()
+        .LoadInto("Invoices")
+        .Done()
+
+    .ExecuteAsync(ct);
+```
+
+Mappings use `FromTables()` to specify the BC API entity name:
+
+```csharp
+public class CustomerMapping : GrimoireMapping<Customer>
+{
+    public override void Configure(IMappingBuilder<Customer> builder)
+    {
+        builder.FromTables("customers");   // BC API entity name
+        builder.Map(c => c.Name, "displayName");
+        builder.Map(c => c.Email, "email");
+    }
+}
+```
+
+Cherry-pick specific entities:
+
+```csharp
+modules.Sales(s => s.Customers().SalesInvoices());
+modules.Financials(f => f.GeneralLedgerEntries().Accounts());
+```
+
+**Modules:** Sales (customers, orders, invoices, credit memos, quotes), Purchasing (vendors, POs, invoices), Financials (GL entries, accounts, dimensions, journals, currencies, tax), Inventory (items, categories, variants, locations, UoMs), HR (employees).
+
+**Auth:** The caller provides an `HttpClient` configured with their auth handler (OAuth2 client credentials, bearer token, etc.). Grimoire does not own authentication.
+
 ## Building
 
 ```bash

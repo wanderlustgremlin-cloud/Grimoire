@@ -11,6 +11,7 @@
   <Project Path="Grimoire.Provider.Oracle/Grimoire.Provider.Oracle.csproj" />
   <Project Path="Grimoire.Provider.MongoDb/Grimoire.Provider.MongoDb.csproj" />
   <Project Path="Grimoire.Connector.OracleEbs/Grimoire.Connector.OracleEbs.csproj" />
+  <Project Path="Grimoire.Connector.BusinessCentral/Grimoire.Connector.BusinessCentral.csproj" />
   <Project Path="Grimoire.Core.Tests/Grimoire.Core.Tests.csproj" />
   <Project Path="Grimoire.Demo.AppHost/Grimoire.Demo.AppHost.csproj" />
   <Project Path="Grimoire.Demo.ServiceDefaults/Grimoire.Demo.ServiceDefaults.csproj" />
