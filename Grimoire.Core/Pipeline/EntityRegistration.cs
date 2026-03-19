@@ -52,7 +52,7 @@ internal sealed class EntityRegistration
             throw new InvalidOperationException($"Entity '{EntityName}' has no load configuration. Call LoadInto() to configure.");
 
         var provider = LoadConfig.Provider ?? defaultTargetProvider
-            ?? throw new InvalidOperationException($"Entity '{EntityName}' has no target provider. Call LoadWith() on the pipeline or provide a provider in LoadInto().");
+            ?? throw new InvalidOperationException($"Entity '{EntityName}' has no target provider. Install a provider package (e.g., Grimoire.Provider.SqlServer) and call .LoadWith(provider) on the pipeline or pass a provider to .LoadInto().");
 
         // Build mapping
         var mapping = (GrimoireMapping<TEntity>?)Mapping

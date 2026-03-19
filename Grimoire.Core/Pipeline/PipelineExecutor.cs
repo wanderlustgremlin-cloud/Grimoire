@@ -44,7 +44,7 @@ internal sealed class PipelineExecutor
             if (entity.CustomExtractor is null && _connector is null)
                 throw new InvalidOperationException($"Entity '{entity.EntityName}' has no data source. Provide a connector or custom extractor.");
             if (entity.LoadConfig.Provider is null && _defaultTargetProvider is null)
-                throw new InvalidOperationException($"Entity '{entity.EntityName}' has no target provider. Call LoadWith() on the pipeline or provide a provider in LoadInto().");
+                throw new InvalidOperationException($"Entity '{entity.EntityName}' has no target provider. Install a provider package (e.g., Grimoire.Provider.SqlServer) and call .LoadWith(provider) on the pipeline or pass a provider to .LoadInto().");
         }
 
         // Topological sort
