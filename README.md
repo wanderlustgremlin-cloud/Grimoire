@@ -76,7 +76,7 @@ pipeline.Entity<AuditLog>()
 
 ## Connector
 
-The connector describes the source database schema. Grimoire generates SQL queries automatically based on the schema and each mapping's `FromTables()` declaration. Identifier quoting adapts to the source database provider (brackets for SQL Server, double quotes for Postgres/Oracle, backticks for MySQL).
+The connector describes the source database schema. Grimoire generates SQL queries automatically based on the schema and each mapping's `FromTables()` declaration. An `ISqlDialect` handles identifier quoting, schema qualification, and pagination for each database.
 
 ```csharp
 public class LegacyConnector(string connectionString) : IConnector
@@ -97,6 +97,19 @@ public class LegacyConnector(string connectionString) : IConnector
     }
 }
 ```
+
+### SQL Dialects
+
+Grimoire auto-selects a dialect from `IConnector.Provider`. Built-in dialects handle quoting, schema prefixes, and pagination:
+
+| Dialect | Quoting | Schema Example | Pagination |
+|---------|---------|----------------|------------|
+| **SQL Server** | `[identifier]` | `[dbo].[Table]` | `OFFSET x ROWS FETCH NEXT y ROWS ONLY` |
+| **PostgreSQL** | `"identifier"` | `"public"."table"` | `LIMIT y OFFSET x` |
+| **Oracle** | `"identifier"` | `"SCHEMA"."TABLE"` | `FETCH FIRST y ROWS ONLY` |
+| **MySQL** | `` `identifier` `` | `` `db`.`table` `` | `LIMIT y OFFSET x` |
+
+Schema qualification is optional — use `Table("name", schema: "legacy")` in `ConfigureSchema`. To override the default dialect, implement `ISqlDialect` and return it from `IConnector.Dialect`.
 
 For non-database sources (APIs, files, queues), implement `ICustomExtractor` instead and use `.ExtractUsing()` per entity.
 

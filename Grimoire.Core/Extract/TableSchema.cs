@@ -3,6 +3,7 @@ namespace Grimoire.Core.Extract;
 public sealed class TableSchema
 {
     public required string TableName { get; init; }
+    public string? Schema { get; init; }
     public List<string> Columns { get; init; } = [];
     public List<JoinDefinition> Joins { get; init; } = [];
 }

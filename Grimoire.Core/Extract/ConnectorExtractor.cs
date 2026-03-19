@@ -1,16 +1,18 @@
-using System.Data.Common;
 using System.Runtime.CompilerServices;
 using System.Text;
+using Grimoire.Core.Extract.Dialects;
 
 namespace Grimoire.Core.Extract;
 
 internal sealed class ConnectorExtractor
 {
     private readonly IConnector _connector;
+    private readonly ISqlDialect _dialect;
 
     public ConnectorExtractor(IConnector connector)
     {
         _connector = connector;
+        _dialect = connector.Dialect ?? DialectFactory.Create(connector.Provider);
     }
 
     public async IAsyncEnumerable<SourceRow> ExtractAsync(
@@ -42,12 +44,11 @@ internal sealed class ConnectorExtractor
         }
     }
 
-    private string Q(string identifier) => _connector.Provider switch
+    private string QualifyTable(string tableName, Dictionary<string, TableSchema> schemas)
     {
-        DatabaseProvider.SqlServer => $"[{identifier}]",
-        DatabaseProvider.MySql => $"`{identifier}`",
-        _ => $"\"{identifier}\""  // Postgres, Oracle use double quotes
-    };
+        var schema = schemas.TryGetValue(tableName, out var ts) ? ts.Schema : null;
+        return _dialect.QualifyTable(tableName, schema);
+    }
 
     private string BuildQuery(ExtractRequest request, Dictionary<string, TableSchema> schemas)
     {
@@ -59,33 +60,32 @@ internal sealed class ConnectorExtractor
             throw new InvalidOperationException($"Table '{primaryTable}' is not defined in the connector schema.");
 
         var sb = new StringBuilder();
+        var q = _dialect;
 
         // SELECT
         if (request.SourceColumns.Count > 0)
         {
             var qualifiedColumns = request.SourceColumns.Select(col =>
             {
-                // Try to find which table has this column
                 foreach (var tableName in request.SourceTables)
                 {
                     if (schemas.TryGetValue(tableName, out var schema) && schema.Columns.Count > 0)
                     {
                         if (schema.Columns.Contains(col, StringComparer.OrdinalIgnoreCase))
-                            return $"{Q(tableName)}.{Q(col)}";
+                            return $"{QualifyTable(tableName, schemas)}.{q.QuoteIdentifier(col)}";
                     }
                 }
-                // Default to primary table
-                return $"{Q(primaryTable)}.{Q(col)}";
+                return $"{QualifyTable(primaryTable, schemas)}.{q.QuoteIdentifier(col)}";
             });
             sb.Append("SELECT ").AppendJoin(", ", qualifiedColumns);
         }
         else
         {
-            sb.Append($"SELECT {Q(primaryTable)}.*");
+            sb.Append($"SELECT {QualifyTable(primaryTable, schemas)}.*");
         }
 
         // FROM
-        sb.Append($" FROM {Q(primaryTable)}");
+        sb.Append($" FROM {QualifyTable(primaryTable, schemas)}");
 
         // JOINs
         for (int i = 1; i < request.SourceTables.Count; i++)
@@ -94,7 +94,7 @@ internal sealed class ConnectorExtractor
             var join = FindJoin(primarySchema, joinTable, schemas);
             if (join is not null)
             {
-                sb.Append($" INNER JOIN {Q(join.ToTable)} ON {Q(join.FromTable)}.{Q(join.FromColumn)} = {Q(join.ToTable)}.{Q(join.ToColumn)}");
+                sb.Append($" INNER JOIN {QualifyTable(join.ToTable, schemas)} ON {QualifyTable(join.FromTable, schemas)}.{q.QuoteIdentifier(join.FromColumn)} = {QualifyTable(join.ToTable, schemas)}.{q.QuoteIdentifier(join.ToColumn)}");
             }
             else
             {
@@ -103,24 +103,26 @@ internal sealed class ConnectorExtractor
             }
         }
 
+        // Pagination
+        var pagination = q.BuildPagination(request.Limit, request.Offset);
+        if (pagination.Length > 0)
+            sb.Append(pagination);
+
         return sb.ToString();
     }
 
     private static JoinDefinition? FindJoin(TableSchema primarySchema, string targetTable, Dictionary<string, TableSchema> schemas)
     {
-        // Check primary table's joins
         var join = primarySchema.Joins.FirstOrDefault(j =>
             j.ToTable.Equals(targetTable, StringComparison.OrdinalIgnoreCase));
         if (join is not null) return join;
 
-        // Check target table's joins back to primary
         if (schemas.TryGetValue(targetTable, out var targetSchema))
         {
             join = targetSchema.Joins.FirstOrDefault(j =>
                 j.ToTable.Equals(primarySchema.TableName, StringComparison.OrdinalIgnoreCase));
             if (join is not null)
             {
-                // Reverse the join direction
                 return new JoinDefinition
                 {
                     FromTable = join.ToTable,

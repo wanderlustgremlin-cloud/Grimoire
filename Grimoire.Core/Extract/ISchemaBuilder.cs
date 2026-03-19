@@ -2,7 +2,7 @@ namespace Grimoire.Core.Extract;
 
 public interface ISchemaBuilder
 {
-    ITableSchemaBuilder Table(string tableName);
+    ITableSchemaBuilder Table(string tableName, string? schema = null);
     Dictionary<string, TableSchema> Build();
 }
 
