@@ -206,6 +206,48 @@ dotnet run --project Grimoire.Demo.AppHost
 
 Aspire spins up a SQL Server container, creates source and target databases, seeds test data, and runs the ETL pipeline. Open the Aspire dashboard URL printed to the console to see structured logs, traces, and metrics.
 
+## Prebuilt Connectors
+
+Grimoire provides prebuilt connectors for common source systems so you don't have to implement `IConnector` yourself.
+
+### Oracle E-Business Suite
+
+`Grimoire.Connector.OracleEbs` provides a version-aware connector for Oracle EBS with 6 modules (HR, AP, AR, GL, PO, INV). Tables, columns, and joins are filtered to your EBS version — no need to know which tables exist in R11i vs R12.2.
+
+```csharp
+var source = new OracleEbsConnector(
+    connectionString,
+    EbsVersion.R122,
+    modules =>
+    {
+        modules.HR();    // all HR tables
+        modules.AP();    // all AP tables
+        modules.GL();    // all GL tables
+    },
+    schemaMode: EbsSchemaMode.Apps   // default: APPS schema views
+);
+
+var result = await new GrimoirePipeline()
+    .ExtractFrom(source)
+    .LoadWith(new SqlServerTargetProvider(targetConnStr))
+    // ... entity mappings ...
+    .ExecuteAsync(ct);
+```
+
+Cherry-pick specific tables within a module:
+
+```csharp
+var source = new OracleEbsConnector(oracleConnStr, EbsVersion.R121, modules =>
+{
+    modules.HR(hr => hr.People().Organizations().Assignments());
+    modules.AP(ap => ap.Invoices().Suppliers());
+});
+```
+
+**Schema mode:** `EbsSchemaMode.Apps` (default) uses the supported APPS schema views. `EbsSchemaMode.BaseTables` queries base tables directly for performance.
+
+**Supported versions:** `R11i`, `R12`, `R121`, `R122` — columns and joins that don't exist in your version are automatically excluded.
+
 ## Building
 
 ```bash
