@@ -67,11 +67,12 @@ pipeline.Entity<AuditLog>()
 
 **Available providers:**
 
-| Package | Target |
-|---------|--------|
-| **Grimoire.Provider.SqlServer** | SQL Server via `SqlBulkCopy`, `OUTPUT INSERTED`, `sys.columns` |
-
-Future: Postgres, Oracle, MySQL, MongoDB.
+| Package | Target | Bulk Strategy |
+|---------|--------|---------------|
+| **Grimoire.Provider.SqlServer** | SQL Server | `SqlBulkCopy`, `OUTPUT INSERTED`, `sys.columns` |
+| **Grimoire.Provider.Postgres** | PostgreSQL | Multi-row `INSERT` with `RETURNING`, `information_schema` |
+| **Grimoire.Provider.Oracle** | Oracle | `INSERT ALL`, `RETURNING INTO`, `USER_TAB_COLUMNS` |
+| **Grimoire.Provider.MongoDb** | MongoDB | `InsertManyAsync`, `_id` auto-generation, filter builders |
 
 ## Connector
 
