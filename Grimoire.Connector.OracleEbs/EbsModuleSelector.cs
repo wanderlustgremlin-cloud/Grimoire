@@ -23,6 +23,21 @@ public sealed class EbsModuleSelector
     public EbsModuleSelector INV(Action<EbsTableSelector>? configure = null)
         => SelectModule("INV", configure);
 
+    public EbsModuleSelector Sales(Action<EbsTableSelector>? configure = null)
+        => SelectModule("Sales", configure);
+
+    public EbsModuleSelector Shipping(Action<EbsTableSelector>? configure = null)
+        => SelectModule("Shipping", configure);
+
+    public EbsModuleSelector FixedAssets(Action<EbsTableSelector>? configure = null)
+        => SelectModule("FixedAssets", configure);
+
+    public EbsModuleSelector EAM(Action<EbsTableSelector>? configure = null)
+        => SelectModule("EAM", configure);
+
+    public EbsModuleSelector Equipment(Action<EbsTableSelector>? configure = null)
+        => SelectModule("Equipment", configure);
+
     private EbsModuleSelector SelectModule(string module, Action<EbsTableSelector>? configure)
     {
         SelectedModules.Add(module);
@@ -106,4 +121,40 @@ public sealed class EbsTableSelector
     public EbsTableSelector MaterialTransactions() => Table("MTL_MATERIAL_TRANSACTIONS");
     public EbsTableSelector InventoryOrganizations() => Table("MTL_PARAMETERS");
     public EbsTableSelector Subinventories() => Table("MTL_SECONDARY_INVENTORIES");
+
+    // Sales convenience methods
+    public EbsTableSelector Orders() => Table("OE_ORDER_HEADERS_ALL");
+    public EbsTableSelector OrderLines() => Table("OE_ORDER_LINES_ALL");
+    public EbsTableSelector Quotes() => Table("OE_QUOTE_HEADERS_ALL");
+    public EbsTableSelector QuoteLines() => Table("OE_QUOTE_LINES_ALL");
+    public EbsTableSelector PickSlips() => Table("OE_PICK_SLIPS");
+    public EbsTableSelector PickSlipLines() => Table("OE_PICK_SLIP_LINES");
+
+    // Shipping convenience methods
+    public EbsTableSelector DeliveryLegs() => Table("WSH_DELIVERY_LEGS");
+    public EbsTableSelector DeliveryDetails() => Table("WSH_DELIVERY_DETAILS");
+    public EbsTableSelector TripStops() => Table("WSH_TRIP_STOPS");
+
+    // Fixed Assets convenience methods
+    public EbsTableSelector AssetMasters() => Table("FA_ADDITIONS");
+    public EbsTableSelector AssetHistory() => Table("FA_ASSET_HISTORY");
+    public EbsTableSelector Retirements() => Table("FA_RETIREMENTS");
+    public EbsTableSelector AssetBooks() => Table("FA_BOOKS");
+    public EbsTableSelector DepreciationDetail() => Table("FA_DEPRN_DETAIL");
+    public EbsTableSelector DepreciationPeriods() => Table("FA_DEPRN_PERIODS");
+
+    // EAM convenience methods
+    public EbsTableSelector EquipmentEam() => Table("EAM_EQUIPMENT_SERIAL_NUM");
+    public EbsTableSelector ActivityHistory() => Table("EAM_ACTIVITY_HISTORY");
+    public EbsTableSelector WorkOrders() => Table("EAM_WORK_ORDERS");
+    public EbsTableSelector WorkOrderActivities() => Table("EAM_WO_ACTIVITIES");
+    public EbsTableSelector ScheduledWorkOrders() => Table("EAM_SCHEDULED_WORK_ORDERS");
+    public EbsTableSelector EquipmentHierarchy() => Table("EAM_OR_NETWORKS");
+
+    // Equipment (Custom) convenience methods
+    public EbsTableSelector EquipmentMasters() => Table("CUSTOM_EQUIPMENT_MASTER");
+    public EbsTableSelector MaintenanceLogs() => Table("CUSTOM_MAINTENANCE_LOG");
+    public EbsTableSelector MaintenanceParts() => Table("CUSTOM_MAINTENANCE_PARTS");
+    public EbsTableSelector MaintenanceSchedules() => Table("CUSTOM_MAINTENANCE_SCHEDULE");
+    public EbsTableSelector EquipmentHistoryLog() => Table("CUSTOM_EQUIPMENT_HISTORY");
 }

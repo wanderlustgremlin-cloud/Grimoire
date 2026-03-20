@@ -53,7 +53,12 @@ public sealed class OracleEbsConnector : IConnector
             new ArModule(),
             new GlModule(),
             new PoModule(),
-            new InvModule()
+            new InvModule(),
+            new SalesModule(),
+            new ShippingModule(),
+            new FixedAssetsModule(),
+            new EamModule(),
+            new EquipmentModule()
         };
 
         foreach (var module in modules)
